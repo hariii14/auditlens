@@ -6,6 +6,8 @@ import path from 'path';
 import fs from 'fs';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
+import Tesseract from 'tesseract.js';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 import {
   MOCK_DOCUMENTS,
@@ -75,7 +77,7 @@ const ExtractionSchema = z.object({
   vendorName: z.string().optional().nullable(),
   invoiceNumber: z.string().optional().nullable(),
   date: z.string().optional().nullable(),
-  currency: z.string().default('USD'),
+  currency: z.string().default('INR'),
   subtotal: z.number().optional().nullable(),
   tax: z.number().optional().nullable(),
   total: z.number().optional().nullable(),
@@ -99,6 +101,76 @@ function getGeminiModel() {
     console.error('Error initializing Gemini client:', err);
     return null;
   }
+}
+
+const suspiciousSignalRules: Array<[string, RegExp]> = [
+  ['Changed or altered remittance instructions', /changed?\s+(?:bank|payment|remittance)|altered\s+(?:bank|payment|remittance)/i],
+  ['Urgent payment instruction requires verification', /urgent|immediate payment|pay immediately/i],
+  ['Offshore or unusual beneficiary detected', /offshore|cayman|escrow|crypto|wallet/i],
+  ['Unverified account-change language detected', /new\s+(?:bank|account)|updated\s+(?:bank|account)|account\s+change/i],
+  ['Possible duplicate invoice language detected', /duplicate|already paid|second invoice/i],
+  ['Amount discrepancy language detected', /mismatch|discrepancy|different amount/i],
+];
+
+async function extractLocalDocumentText(file?: Express.Multer.File, pastedText?: string) {
+  if (pastedText?.trim()) return { text: pastedText.trim(), source: 'Pasted text extraction', confidence: 0.98 };
+  if (!file) return { text: '', source: 'No local content', confidence: 0 };
+
+  if (file.mimetype.includes('pdf')) {
+    const pdf = await getDocument({ data: new Uint8Array(file.buffer), useSystemFonts: true, isEvalSupported: false }).promise;
+    const pageTexts: string[] = [];
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      pageTexts.push(content.items.map((item: any) => `${item.str || ''}${item.hasEOL ? '\n' : ' '}`).join('').trim());
+      page.cleanup();
+    }
+    const text = pageTexts.join('\n').trim();
+    await pdf.destroy();
+    return { text, source: `Local PDF extraction (${pageTexts.length} page${pageTexts.length === 1 ? '' : 's'})`, confidence: text ? 0.94 : 0 };
+  }
+  if (file.mimetype.includes('image')) {
+    const result = await Tesseract.recognize(file.buffer, 'eng');
+    return { text: result.data.text.trim(), source: 'Local Tesseract OCR', confidence: Math.max(0, Math.min(1, result.data.confidence / 100)) };
+  }
+  if (file.mimetype.includes('text') || file.mimetype.includes('csv')) {
+    return { text: file.buffer.toString('utf-8').trim(), source: 'Local text extraction', confidence: 0.98 };
+  }
+  return { text: '', source: 'Unsupported local binary format', confidence: 0 };
+}
+
+function parseInvoiceText(text: string, filename: string, confidence: number): z.infer<typeof ExtractionSchema> {
+  const normalized = text.replace(/\r/g, '').replace(/[ \t]+/g, ' ');
+  const lines = normalized.split('\n').map(line => line.trim()).filter(Boolean);
+  const amountPattern = /(?:₹|INR|Rs\.?|USD|\$)\s*([0-9][0-9,]*(?:\.\d{1,2})?)/ig;
+  const labelledTotal = normalized.match(/^\s*(?:grand\s+total|invoice\s+total|amount\s+due|total\s+due|net\s+payable|total)\b[^\d₹$]{0,18}(?:₹|INR|Rs\.?|USD|\$)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)/im);
+  const amounts = Array.from(normalized.matchAll(amountPattern)).map(match => Number(match[1].replace(/,/g, ''))).filter(Number.isFinite);
+  const subtotal = normalized.match(/subtotal[^\d₹$]{0,15}(?:₹|INR|Rs\.?|USD|\$)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)/i)?.[1];
+  const tax = normalized.match(/(?:gst|vat|tax)[^\d₹$]{0,15}(?:₹|INR|Rs\.?|USD|\$)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)/i)?.[1];
+  const invoiceNumber = normalized.match(/invoice\s*(?:no\.?|number|#)\s*[:#-]?\s*([a-z0-9][a-z0-9\/-]*)/i)?.[1]
+    || normalized.match(/(?:invoice|inv)\s*[:#-]\s*([a-z0-9][a-z0-9\/-]*)/i)?.[1];
+  const date = normalized.match(/(?:invoice\s+date|date)[\s:#-]*(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4})/i)?.[1];
+  const accountNumberLast4 = normalized.match(/(?:account|acct|a\/c)[^\d]{0,20}(?:x+|\*+)?(\d{4})(?!\d)/i)?.[1];
+  const vendorLine = lines.find(line => /(?:ltd|llp|inc|llc|logistics|technologies|services|solutions|enterprises|company|corp)/i.test(line) && line.length < 90);
+  const fallbackVendor = filename.replace(/\.[^/.]+$/, '').split(/[-_]/).filter(Boolean).slice(0, 3).join(' ');
+  const signals = suspiciousSignalRules.filter(([, pattern]) => pattern.test(normalized)).map(([label]) => label);
+  const total = labelledTotal ? Number(labelledTotal[1].replace(/,/g, '')) : (amounts.length > 0 ? Math.max(...amounts) : null);
+  const bankLine = lines.find(line => /bank|beneficiary|remit/i.test(line));
+
+  return {
+    vendorName: vendorLine?.replace(/^(from|vendor|bill from)\s*[:\-]?\s*/i, '').slice(0, 100) || fallbackVendor || 'Unknown Vendor',
+    invoiceNumber: invoiceNumber || null,
+    date: date || null,
+    currency: /\$|USD/i.test(normalized) ? 'USD' : 'INR',
+    subtotal: subtotal ? Number(subtotal.replace(/,/g, '')) : null,
+    tax: tax ? Number(tax.replace(/,/g, '')) : null,
+    total,
+    bankName: bankLine?.slice(0, 100) || null,
+    accountNumberLast4: accountNumberLast4 || null,
+    visualFlags: signals.length > 0 ? signals : ['No high-risk payment language detected'],
+    confidenceScore: confidence,
+    notes: `Extracted from ${lines.length} recognized text lines.`,
+  };
 }
 
 // ----------------------------------------------------
@@ -186,17 +258,17 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     else if (filename.toLowerCase().includes('statement')) docType = 'bank_statement';
     else if (mimeType.includes('text') || pastedText) docType = 'vendor_email';
 
-    let extractedData: z.infer<typeof ExtractionSchema> = {
-      vendorName: 'Unknown Vendor',
-      invoiceNumber: `INV-${Math.floor(1000 + Math.random() * 9000)}`,
-      date: new Date().toISOString().slice(0, 10),
-      currency: 'USD',
-      total: 0,
-      visualFlags: [],
-      confidenceScore: 0.85,
-    };
+    let localExtraction = { text: '', source: 'No local content', confidence: 0 };
+    try {
+      localExtraction = await extractLocalDocumentText(file, pastedText);
+    } catch (extractionError: any) {
+      console.warn('Local document extraction failed:', extractionError.message);
+      localExtraction.source = `Local extraction failed: ${extractionError.message}`;
+    }
 
-    let extractionSource = 'Local Forensic Engine (Demo/Synthetic mode)';
+    let extractedData = parseInvoiceText(localExtraction.text, filename, localExtraction.confidence);
+    let extractionSource = localExtraction.source;
+    let geminiExtracted = false;
     const geminiModel = getGeminiModel();
 
     if (geminiModel) {
@@ -240,64 +312,31 @@ Only output the JSON object. Do not wrap in markdown or backticks if possible.`;
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]);
           const validated = ExtractionSchema.parse(parsed);
-          extractedData = validated;
+          const localSignals = suspiciousSignalRules.filter(([, pattern]) => pattern.test(localExtraction.text)).map(([label]) => label);
+          extractedData = {
+            ...validated,
+            visualFlags: Array.from(new Set([...(validated.visualFlags || []), ...localSignals])),
+          };
           extractionSource = 'Gemini 1.5 Flash Multimodal Ingestion';
+          geminiExtracted = true;
         }
       } catch (geminiErr: any) {
         console.warn('Gemini extraction error, falling back to local heuristic extraction:', geminiErr.message);
-        extractionSource = `Local Heuristic Parser (Gemini call error: ${geminiErr.message})`;
-      }
-    } else {
-      // Local Heuristic parsing for demo
-      const textToParse = pastedText || (file ? file.buffer.toString('utf-8').slice(0, 2000) : '');
-      const lower = textToParse.toLowerCase();
-
-      if (lower.includes('cloudbox')) {
-        extractedData = {
-          vendorName: 'CloudBox Inc',
-          invoiceNumber: 'CB-102',
-          date: new Date().toISOString().slice(0, 10),
-          currency: 'INR',
-          subtotal: 846.61,
-          tax: 152.39,
-          total: 999.00,
-          bankName: 'HDFC Tech Banking',
-          accountNumberLast4: '5512',
-          visualFlags: ['Verified Standard DPI', 'Digital Signature Valid'],
-          confidenceScore: 0.95,
-          notes: 'November Cloud Storage Cycle - Auto detected',
-        };
-      } else if (lower.includes('apex') || lower.includes('freight')) {
-        extractedData = {
-          vendorName: 'Apex Logistics',
-          invoiceNumber: `INV-${Math.floor(1000 + Math.random() * 9000)}`,
-          date: new Date().toISOString().slice(0, 10),
-          currency: 'INR',
-          subtotal: 5084.75,
-          tax: 915.25,
-          total: 6000.00,
-          bankName: 'Cayman Trust Offshore Bank',
-          accountNumberLast4: '9012',
-          visualFlags: ['Suspicious Remittance Shift', 'Offshore IBAN Divergence'],
-          confidenceScore: 0.82,
-          notes: 'Logistics remittance update - flagged for offshore divergence',
-        };
-      } else {
-        // Generic fallback parser
-        const amountMatch = textToParse.match(/\$([0-9,]+(?:\.[0-9]{2})?)|(?:₹|INR)\s*([0-9,]+(?:\.[0-9]{2})?)/);
-        const total = amountMatch ? parseFloat((amountMatch[1] || amountMatch[2]).replace(/,/g, '')) : 250.00;
-        extractedData = {
-          vendorName: filename.replace(/\.[^/.]+$/, '').split(/[-_]/)[0] || 'Enterprise Vendor',
-          invoiceNumber: `INV-${Math.floor(1000 + Math.random() * 9000)}`,
-          date: new Date().toISOString().slice(0, 10),
-          currency: textToParse.includes('₹') || textToParse.includes('INR') ? 'INR' : 'USD',
-          total,
-          visualFlags: ['Standard Document Resolution Verified'],
-          confidenceScore: 0.90,
-          notes: `Parsed via ${extractionSource}`,
-        };
+        extractionSource = `${localExtraction.source} (Gemini error: ${geminiErr.message})`;
       }
     }
+
+    const recognizedVendor = state.vendors.find(vendor =>
+      [vendor.name, ...vendor.aliases].some(alias => localExtraction.text.toLowerCase().includes(alias.toLowerCase()))
+    );
+    if (recognizedVendor) extractedData.vendorName = recognizedVendor.name;
+
+    const qualityFlags: string[] = [];
+    if (!extractedData.vendorName || extractedData.vendorName === 'Unknown Vendor') qualityFlags.push('Vendor could not be reliably identified');
+    if (!extractedData.invoiceNumber) qualityFlags.push('Invoice number could not be read');
+    if (extractedData.total == null || extractedData.total <= 0) qualityFlags.push('Invoice total could not be read');
+    if (!geminiExtracted && localExtraction.confidence < 0.65) qualityFlags.push('Low-confidence document extraction requires manual review');
+    extractedData.visualFlags = Array.from(new Set([...(extractedData.visualFlags || []), ...qualityFlags]));
 
     // Create the document record
     const newDoc: DocumentRecord = {
@@ -305,19 +344,22 @@ Only output the JSON object. Do not wrap in markdown or backticks if possible.`;
       filename,
       type: docType,
       uploadDate: new Date().toISOString().slice(0, 10),
-      processingStatus: extractedData.visualFlags.some(f => f.toLowerCase().includes('suspicious') || f.toLowerCase().includes('mismatch')) ? 'flagged' : 'parsed',
+      processingStatus: extractedData.visualFlags.some(flag => /suspicious|mismatch|altered|changed|offshore|unverified|duplicate|divergence|urgent|could not be read|low-confidence/i.test(flag)) ? 'flagged' : 'parsed',
       fileSize: file ? file.size : pastedText.length,
       extractedFields: extractedData,
       sourceReference: `${source} (Via ${extractionSource})`,
-      rawContent: pastedText || (file ? `Binary attachment [${file.originalname}] processed` : ''),
+      rawContent: localExtraction.text.slice(0, 12000),
       visualFlags: extractedData.visualFlags,
     };
 
     state.documents.unshift(newDoc);
 
-    // If an invoice was extracted, create corresponding invoice record and link to graph
-    if (extractedData.total && extractedData.total > 0) {
-      let vendor = state.vendors.find(v => v.name.toLowerCase() === (extractedData.vendorName || '').toLowerCase());
+    // Synchronize an invoice only when its core identity and amount were actually read.
+    if (extractedData.total && extractedData.total > 0 && extractedData.invoiceNumber && extractedData.vendorName && extractedData.vendorName !== 'Unknown Vendor') {
+      const extractedVendorName = extractedData.vendorName.toLowerCase();
+      let vendor = state.vendors.find(v =>
+        v.name.toLowerCase() === extractedVendorName || v.aliases.some(alias => alias.toLowerCase() === extractedVendorName)
+      );
       if (!vendor) {
         vendor = {
           id: `vend-${Date.now()}`,
@@ -326,17 +368,19 @@ Only output the JSON object. Do not wrap in markdown or backticks if possible.`;
           aliases: [extractedData.vendorName || 'New Vendor'],
           availableIdentifiers: {
             verifiedEmailDomains: [],
-            verifiedBankAccounts: extractedData.accountNumberLast4 ? [
+            verifiedBankAccounts: newDoc.processingStatus !== 'flagged' && extractedData.accountNumberLast4 ? [
               { bankName: extractedData.bankName || 'Bank', last4: extractedData.accountNumberLast4, country: 'US' }
             ] : [],
           },
           associatedRecordIds: [docId],
           riskRating: 'low',
           monthlySpend: extractedData.total,
-          currency: extractedData.currency || 'USD',
+          currency: extractedData.currency || 'INR',
         };
         state.vendors.push(vendor);
       }
+      if (!vendor.associatedRecordIds.includes(docId)) vendor.associatedRecordIds.push(docId);
+      if (newDoc.processingStatus === 'flagged') vendor.riskRating = 'high';
 
       const invId = `inv-${Date.now()}`;
       const newInvoice = {
@@ -344,7 +388,7 @@ Only output the JSON object. Do not wrap in markdown or backticks if possible.`;
         vendorId: vendor.id,
         invoiceNumber: extractedData.invoiceNumber || `INV-${Date.now()}`,
         invoiceDate: extractedData.date || new Date().toISOString().slice(0, 10),
-        currency: extractedData.currency || 'USD',
+        currency: extractedData.currency || 'INR',
         subtotal: extractedData.subtotal || extractedData.total,
         tax: extractedData.tax || 0,
         total: extractedData.total,
@@ -357,6 +401,7 @@ Only output the JSON object. Do not wrap in markdown or backticks if possible.`;
         visualFlags: extractedData.visualFlags,
       };
       state.invoices.push(newInvoice);
+      vendor.associatedRecordIds.push(invId);
 
       // Add Evidence Edges
       state.edges.push({
@@ -386,13 +431,40 @@ Only output the JSON object. Do not wrap in markdown or backticks if possible.`;
         documents: state.documents,
       });
 
-      // Update state anomalies
+      if (newDoc.processingStatus === 'flagged' && !freshAnomalies.some(finding => finding.supportingRecordIds.includes(docId))) {
+        freshAnomalies.unshift({
+          id: `anom-upload-${docId}`,
+          title: `Suspicious Invoice Requires Review: ${newInvoice.invoiceNumber}`,
+          category: 'VISUAL_OR_DOMAIN_IRREGULARITY',
+          severity: 'high',
+          amountInDispute: newInvoice.total,
+          currency: newInvoice.currency,
+          explanation: `The uploaded invoice contains high-risk forensic signals: ${(newDoc.visualFlags || []).join('; ')}. Payment instructions must be independently verified before approval.`,
+          supportingRecordIds: [docId, invId, vendor.id],
+          detectionMethod: 'Upload Content & Payment Instruction Risk Classifier',
+          detectionRule: 'RULE_SUSPICIOUS_UPLOADED_INVOICE',
+          uncertainty: 'The language may reflect a legitimate vendor account update, but it cannot be trusted without out-of-band verification.',
+          verificationChecklist: [
+            'Do not approve payment using instructions from this invoice.',
+            'Call the vendor using a previously verified phone number.',
+            'Compare the beneficiary account with the vendor master record.',
+          ],
+          status: 'NEEDS_REVIEW',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+
+      // Update state anomalies and retain findings caused by this upload.
+      const uploadFindings: AnomalyRecord[] = [];
       for (const fresh of freshAnomalies) {
+        if (fresh.supportingRecordIds.includes(docId)) uploadFindings.push(fresh);
         if (!state.anomalies.some(a => a.id === fresh.id || a.title === fresh.title)) {
           state.anomalies.unshift(fresh);
           // Auto create investigation for fresh anomaly
+          const investigationId = `inv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
           state.investigations.unshift({
-            id: `inv-${Date.now()}`,
+            id: investigationId,
             title: fresh.title,
             relatedVendorIds: [vendor.id],
             anomalyIds: [fresh.id],
@@ -404,7 +476,7 @@ Only output the JSON object. Do not wrap in markdown or backticks if possible.`;
             reviewHistory: [
               {
                 id: `rev-${Date.now()}`,
-                investigationId: `inv-${Date.now()}`,
+                investigationId,
                 anomalyId: fresh.id,
                 action: 'NEEDS_REVIEW',
                 notes: `Triggered by rule ${fresh.detectionRule} upon document upload.`,
@@ -415,6 +487,74 @@ Only output the JSON object. Do not wrap in markdown or backticks if possible.`;
           });
         }
       }
+
+      if (uploadFindings.length > 0) {
+        newDoc.processingStatus = 'flagged';
+        newDoc.visualFlags = Array.from(new Set([
+          ...(newDoc.visualFlags || []),
+          ...uploadFindings.map(finding => finding.title),
+        ]));
+        newDoc.extractedFields.forensicFindings = uploadFindings.map(finding => ({
+          id: finding.id,
+          title: finding.title,
+          severity: finding.severity,
+          explanation: finding.explanation,
+          category: finding.category,
+        }));
+      }
+    }
+
+    if (newDoc.processingStatus === 'flagged' && !Array.isArray(newDoc.extractedFields.forensicFindings)) {
+      const finding: AnomalyRecord = {
+        id: `anom-upload-${docId}`,
+        title: `Uploaded Invoice Requires Manual Review: ${extractedData.invoiceNumber || filename}`,
+        category: 'VISUAL_OR_DOMAIN_IRREGULARITY',
+        severity: 'high',
+        amountInDispute: extractedData.total || undefined,
+        currency: extractedData.currency || 'INR',
+        explanation: `AuditLens could not safely synchronize this invoice because: ${(newDoc.visualFlags || []).join('; ')}. Verify the source document before approving payment.`,
+        supportingRecordIds: [docId],
+        detectionMethod: 'Document Extraction Completeness & Payment Risk Validator',
+        detectionRule: 'RULE_UNREADABLE_OR_SUSPICIOUS_UPLOAD',
+        uncertainty: 'The source may be low-resolution or use an unsupported layout; manual confirmation is required.',
+        verificationChecklist: [
+          'Confirm the vendor, invoice number, and total against the original document.',
+          'Verify payment instructions through an established vendor contact.',
+          'Upload a higher-resolution copy if key fields are unreadable.',
+        ],
+        status: 'NEEDS_REVIEW',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      const investigationId = `inv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      state.anomalies.unshift(finding);
+      state.investigations.unshift({
+        id: investigationId,
+        title: finding.title,
+        relatedVendorIds: [],
+        anomalyIds: [finding.id],
+        severity: finding.severity,
+        status: finding.status,
+        createdAt: finding.createdAt,
+        updatedAt: finding.updatedAt,
+        summaryNote: finding.explanation,
+        reviewHistory: [{
+          id: `rev-${Date.now()}`,
+          investigationId,
+          anomalyId: finding.id,
+          action: 'NEEDS_REVIEW',
+          notes: 'Created because the uploaded document could not be safely synchronized.',
+          author: 'AuditLens Autonomous Sentinel',
+          timestamp: new Date().toISOString(),
+        }],
+      });
+      newDoc.extractedFields.forensicFindings = [{
+        id: finding.id,
+        title: finding.title,
+        severity: finding.severity,
+        explanation: finding.explanation,
+        category: finding.category,
+      }];
     }
 
     res.json({

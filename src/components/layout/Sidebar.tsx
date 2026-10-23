@@ -20,7 +20,6 @@ interface SidebarProps {
 const NAV_ITEMS = [
   { label: 'Overview', path: '/dashboard', icon: LayoutDashboard },
   { label: 'Investigations', path: '/investigations', icon: ShieldAlert, hasBadge: true },
-  { label: 'Evidence Graph', path: '/graph', icon: GitFork, isSpecial: true },
   { label: 'Documents', path: '/documents', icon: FileText },
   { label: 'Transactions', path: '/transactions', icon: CreditCard },
   { label: 'Vendors', path: '/vendors', icon: Building2 },
@@ -34,7 +33,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenIngest }) => {
   ).length;
 
   return (
-    <aside className="w-56 border-r border-paper-300 bg-paper-50 flex flex-col h-screen sticky top-0 select-none shrink-0">
+    <aside className="hidden w-56 border-r border-paper-300 bg-paper-50 md:flex flex-col h-screen sticky top-0 select-none shrink-0">
       {/* Brand */}
       <div className="px-4 py-3.5 border-b border-paper-300">
         <NavLink to="/" className="flex items-center gap-2.5 group">
@@ -93,11 +92,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenIngest }) => {
                 isActive
                   ? 'bg-forest-100 text-forest-900 font-semibold'
                   : 'text-charcoal-600 hover:text-charcoal-900 hover:bg-paper-200/80'
-              } ${item.isSpecial ? 'border border-dashed border-forest-600/30' : ''}`
+              } ${('isSpecial' in item && (item as any).isSpecial) ? 'border border-dashed border-forest-600/30' : ''}`
             }
           >
             <div className="flex items-center gap-2">
-              <item.icon className={`w-3.5 h-3.5 shrink-0 ${item.isSpecial ? 'text-forest-700' : ''}`} />
+              <item.icon className={`w-3.5 h-3.5 shrink-0 ${('isSpecial' in item && (item as any).isSpecial) ? 'text-forest-700' : ''}`} />
               <span>{item.label}</span>
             </div>
             {item.hasBadge && highRiskCount > 0 && (

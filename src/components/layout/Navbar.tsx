@@ -17,7 +17,6 @@ interface NavbarProps {
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'Overview',
   '/investigations': 'Investigations',
-  '/graph': 'Evidence Graph',
   '/documents': 'Document Vault',
   '/transactions': 'Transactions',
   '/vendors': 'Vendors',

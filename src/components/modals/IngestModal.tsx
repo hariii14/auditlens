@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   X,
   UploadCloud,
@@ -32,12 +33,14 @@ interface FileEntry {
 
 export const IngestModal: React.FC<IngestModalProps> = ({ isOpen, onClose }) => {
   const { uploadDocument } = useData();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'upload' | 'camera' | 'email'>('upload');
   const [dragActive, setDragActive] = useState(false);
   const [fileQueue, setFileQueue] = useState<FileEntry[]>([]);
   const [pastedText, setPastedText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [allDone, setAllDone] = useState(false);
+  const [pastedResult, setPastedResult] = useState<DocumentRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -130,7 +133,8 @@ export const IngestModal: React.FC<IngestModalProps> = ({ isOpen, onClose }) => 
         }
       } else if (pastedText.trim()) {
         const source = activeTab === 'email' ? 'Pasted Email Forward' : 'Pasted Text';
-        await uploadDocument(undefined, pastedText.trim(), source);
+        const doc = await uploadDocument(undefined, pastedText.trim(), source);
+        setPastedResult(doc);
         setPastedText('');
       }
 
@@ -146,12 +150,16 @@ export const IngestModal: React.FC<IngestModalProps> = ({ isOpen, onClose }) => 
     setFileQueue([]);
     setPastedText('');
     setAllDone(false);
+    setPastedResult(null);
     setError(null);
   };
 
-  const doneCount = fileQueue.filter(f => f.status === 'done').length;
   const errorCount = fileQueue.filter(f => f.status === 'error').length;
   const totalQueued = fileQueue.length;
+  const reviewResults = [
+    ...fileQueue.flatMap(entry => entry.result ? [entry.result] : []),
+    ...(pastedResult ? [pastedResult] : []),
+  ];
 
   function FileSize({ size }: { size: number }) {
     if (size < 1024) return <>{size} B</>;
@@ -184,39 +192,34 @@ export const IngestModal: React.FC<IngestModalProps> = ({ isOpen, onClose }) => 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* Success view */}
-          {allDone && totalQueued > 0 ? (
+          {allDone && reviewResults.length > 0 ? (
             <div className="space-y-4">
-              <div className="p-4 rounded-xl bg-forest-50 border border-forest-600/30 flex items-start gap-3">
-                <CheckCircle2 className="w-5 h-5 text-forest-700 mt-0.5 shrink-0" />
+              <div className={`p-4 rounded-xl border flex items-start gap-3 ${reviewResults.some(doc => doc.processingStatus === 'flagged') ? 'bg-red-50 border-red-200' : 'bg-forest-50 border-forest-600/30'}`}>
+                {reviewResults.some(doc => doc.processingStatus === 'flagged') ? <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 shrink-0" /> : <CheckCircle2 className="w-5 h-5 text-forest-700 mt-0.5 shrink-0" />}
                 <div>
-                  <h4 className="text-sm font-bold text-forest-900">
-                    {doneCount}/{totalQueued} {doneCount === 1 ? 'document' : 'documents'} ingested
+                  <h4 className={`text-sm font-bold ${reviewResults.some(doc => doc.processingStatus === 'flagged') ? 'text-red-900' : 'text-forest-900'}`}>
+                    Document review ready
                     {errorCount > 0 && ` · ${errorCount} with errors`}
                   </h4>
-                  <p className="text-xs text-forest-800 mt-0.5">
-                    Documents processed and verified against vendor profiles. Anomaly engine ran automatically.
+                  <p className={`text-xs mt-0.5 ${reviewResults.some(doc => doc.processingStatus === 'flagged') ? 'text-red-700' : 'text-forest-800'}`}>
+                    {reviewResults.some(doc => doc.processingStatus === 'flagged') ? 'Potential invoice issues were found. Review the evidence below before approving payment.' : 'No high-risk invoice discrepancies were detected.'}
                   </p>
                 </div>
               </div>
 
-              {/* Per-file results */}
+              {/* Immediate per-document forensic review */}
               <div className="space-y-2">
-                {fileQueue.map((entry, i) => (
-                  <div
-                    key={i}
-                    className={`flex items-center gap-3 p-2.5 rounded-lg border text-xs ${
-                      entry.status === 'error'
-                        ? 'bg-red-50 border-red-200'
-                        : 'bg-forest-50 border-forest-600/20'
-                    }`}
-                  >
-                    <File className={`w-4 h-4 shrink-0 ${entry.status === 'error' ? 'text-red-500' : 'text-forest-700'}`} />
-                    <span className="font-medium text-charcoal-800 truncate flex-1">{entry.file.name}</span>
-                    {entry.status === 'done' ? (
-                      <span className="text-forest-700 font-semibold shrink-0">✓ Parsed</span>
-                    ) : (
-                      <span className="text-red-600 font-semibold shrink-0">{entry.error || 'Error'}</span>
-                    )}
+                {reviewResults.map(doc => (
+                  <div key={doc.id} className={`rounded-xl border p-3 text-xs ${doc.processingStatus === 'flagged' ? 'border-red-200 bg-red-50/50' : 'border-forest-600/20 bg-forest-50/50'}`}>
+                    <div className="flex items-center gap-2"><File className={`w-4 h-4 ${doc.processingStatus === 'flagged' ? 'text-red-600' : 'text-forest-700'}`} /><p className="min-w-0 flex-1 truncate font-bold text-charcoal-900">{doc.filename}</p><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${doc.processingStatus === 'flagged' ? 'bg-red-100 text-red-700' : 'bg-forest-100 text-forest-800'}`}>{doc.processingStatus === 'flagged' ? 'Review required' : 'Verified'}</span></div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 rounded-lg border border-paper-200 bg-white p-3">
+                      <div><span className="block text-[9px] uppercase text-charcoal-400">Vendor</span><b>{doc.extractedFields.vendorName || 'Unknown'}</b></div>
+                      <div><span className="block text-[9px] uppercase text-charcoal-400">Invoice</span><b className="font-mono">{doc.extractedFields.invoiceNumber || 'N/A'}</b></div>
+                      <div><span className="block text-[9px] uppercase text-charcoal-400">Total</span><b>{doc.extractedFields.currency || 'INR'} {(doc.extractedFields.total || 0).toLocaleString('en-IN')}</b></div>
+                      <div><span className="block text-[9px] uppercase text-charcoal-400">Confidence</span><b>{Math.round((doc.extractedFields.confidenceScore || 0) * 100)}%</b></div>
+                    </div>
+                    {doc.visualFlags && doc.visualFlags.length > 0 && <div className={`mt-2 rounded-lg border p-2 ${doc.processingStatus === 'flagged' ? 'border-red-200 bg-white text-red-800' : 'border-paper-200 bg-white text-charcoal-600'}`}><p className="mb-1 text-[9px] font-bold uppercase">Forensic observations</p>{doc.visualFlags.map((flag, index) => <p key={index} className="text-[10px]">{doc.processingStatus === 'flagged' ? '⚠' : '✓'} {flag}</p>)}</div>}
+                    {Array.isArray(doc.extractedFields.forensicFindings) && doc.extractedFields.forensicFindings.map((finding: any) => <div key={finding.id} className="mt-2 rounded-lg border border-red-200 bg-white p-2"><p className="text-[10px] font-bold text-red-800">{finding.title}</p><p className="mt-1 text-[10px] leading-relaxed text-charcoal-600">{finding.explanation}</p></div>)}
                   </div>
                 ))}
               </div>
@@ -225,7 +228,7 @@ export const IngestModal: React.FC<IngestModalProps> = ({ isOpen, onClose }) => 
                 <button onClick={handleReset} className="btn-secondary text-xs">
                   Upload More
                 </button>
-                <button onClick={onClose} className="btn-primary">
+                <button onClick={() => { onClose(); navigate('/documents'); }} className="btn-primary">
                   View Documents <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>

@@ -155,7 +155,7 @@ export const DocumentsPage: React.FC = () => {
 
                   <td className="py-3.5 px-4 font-bold text-charcoal-900">
                     {doc.extractedFields.total != null
-                      ? `${doc.extractedFields.currency || 'USD'} ${doc.extractedFields.total.toFixed(2)}`
+                      ? `${doc.extractedFields.currency || 'INR'} ${doc.extractedFields.total.toFixed(2)}`
                       : '—'}
                   </td>
 

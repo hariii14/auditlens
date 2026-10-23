@@ -84,7 +84,7 @@ export const ReportsPage: React.FC = () => {
       doc.text('1. EXECUTIVE SUMMARY & RECOVERY METRICS', 14, 52);
 
       doc.setFontSize(10);
-      doc.text(`• Total Capital Recovered & Fraud Prevented: $${(metrics.recoveredAmount + metrics.preventedFraudAmount).toFixed(2)}`, 14, 60);
+      doc.text(`• Total Capital Recovered & Fraud Prevented: ₹${(metrics.recoveredAmount + metrics.preventedFraudAmount).toFixed(2)}`, 14, 60);
       doc.text(`• Audit Cleanliness Score: ${metrics.overallScore.toFixed(1)}% (IRS Schedule C Ready)`, 14, 66);
       doc.text(`• Monitored Ledger Transactions: ${metrics.totalTransactions} (${metrics.reconciledCount} fully reconciled)`, 14, 72);
       doc.text(`• Active Discrepancies Requiring Triage: ${anomalies.filter(a => a.status === 'NEEDS_REVIEW').length}`, 14, 78);
@@ -220,13 +220,13 @@ export const ReportsPage: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
           <div className="p-3.5 rounded-xl bg-paper-50 border border-paper-200 space-y-1">
             <span className="text-[10px] uppercase font-bold text-charcoal-400">Software & Cloud Hosting</span>
-            <p className="text-base font-extrabold text-charcoal-900">$1,425.00</p>
+            <p className="text-base font-extrabold text-charcoal-900">₹1,425.00</p>
             <p className="text-[11px] text-charcoal-500">Figma, Notion, CloudBox (100% deductible)</p>
           </div>
 
           <div className="p-3.5 rounded-xl bg-paper-50 border border-paper-200 space-y-1">
             <span className="text-[10px] uppercase font-bold text-charcoal-400">Travel & Lodging</span>
-            <p className="text-base font-extrabold text-charcoal-900">$428.00</p>
+            <p className="text-base font-extrabold text-charcoal-900">₹428.00</p>
             <p className="text-[11px] text-charcoal-500">Delta Air Lines (Boarding pass verified)</p>
           </div>
 

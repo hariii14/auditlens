@@ -184,11 +184,11 @@ export const InvestigationDetailPage: React.FC = () => {
         </div>
 
         <NavLink
-          to="/graph"
+          to="/investigations"
           className="btn-secondary shrink-0"
         >
           <GitFork className="w-3.5 h-3.5 text-forest-700" />
-          <span className="hidden sm:inline">Trace in Graph</span>
+          <span className="hidden sm:inline">Trace</span>
         </NavLink>
       </div>
 

@@ -7,7 +7,6 @@ import { LandingPage } from './pages/LandingPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { InvestigationsPage } from './pages/InvestigationsPage';
 import { InvestigationDetailPage } from './pages/InvestigationDetailPage';
-import { EvidenceGraphPage } from './pages/EvidenceGraphPage';
 import { DocumentsPage } from './pages/DocumentsPage';
 import { TransactionsPage } from './pages/TransactionsPage';
 import { VendorsPage } from './pages/VendorsPage';
@@ -27,7 +26,6 @@ export function App() {
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/investigations" element={<InvestigationsPage />} />
             <Route path="/investigations/:id" element={<InvestigationDetailPage />} />
-            <Route path="/graph" element={<EvidenceGraphPage />} />
             <Route path="/documents" element={<DocumentsPage />} />
             <Route path="/transactions" element={<TransactionsPage />} />
             <Route path="/vendors" element={<VendorsPage />} />

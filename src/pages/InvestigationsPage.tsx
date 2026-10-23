@@ -104,11 +104,11 @@ export const InvestigationsPage: React.FC = () => {
           </p>
         </div>
         <NavLink
-          to="/graph"
+          to="/investigations"
           className="btn-secondary"
         >
           <GitFork className="w-3.5 h-3.5 text-forest-700" />
-          Evidence Graph
+          Investigations
         </NavLink>
       </div>
 

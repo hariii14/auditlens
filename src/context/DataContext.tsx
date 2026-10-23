@@ -200,25 +200,42 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Client-side fallback ingestion
     const docId = `doc-${Date.now()}`;
+    const reviewText = `${file?.name || ''} ${pastedText || ''}`;
+    const suspiciousFlags = [
+      ['Changed or altered remittance instructions', /changed?\s+(?:bank|payment|remittance)|altered\s+(?:bank|payment|remittance)/i],
+      ['Urgent payment instruction requires verification', /urgent|immediate payment|pay immediately/i],
+      ['Offshore or unusual beneficiary detected', /offshore|cayman|escrow|crypto|wallet/i],
+      ['Possible duplicate invoice detected', /duplicate|already paid|second invoice/i],
+      ['Amount discrepancy detected', /mismatch|discrepancy|different amount/i],
+    ].filter(([, pattern]) => (pattern as RegExp).test(reviewText)).map(([label]) => label as string);
+    const amountMatch = reviewText.match(/(?:₹|INR)\s*([0-9,]+(?:\.[0-9]{2})?)/i);
+    const invoiceMatch = reviewText.match(/(?:invoice|inv(?:oice)?\s*(?:no|number|#)?)[\s:#-]*([a-z0-9-]+)/i);
     const newDoc: DocumentRecord = {
       id: docId,
       filename: file ? file.name : `Pasted_Note_${new Date().toISOString().slice(0, 10)}.txt`,
       type: file?.type.includes('image') ? 'receipt_img' : 'invoice_pdf',
       uploadDate: new Date().toISOString().slice(0, 10),
-      processingStatus: 'parsed',
+      processingStatus: suspiciousFlags.length > 0 ? 'flagged' : 'parsed',
       fileSize: file?.size || pastedText?.length || 1024,
       extractedFields: {
         vendorName: 'Direct Ingest Vendor',
-        invoiceNumber: `INV-${Math.floor(1000 + Math.random() * 9000)}`,
+        invoiceNumber: invoiceMatch?.[1] || `INV-${Math.floor(1000 + Math.random() * 9000)}`,
         date: new Date().toISOString().slice(0, 10),
-        currency: 'USD',
-        total: 120.00,
-        confidenceScore: 0.92,
-        notes: 'Locally parsed financial record',
+        currency: 'INR',
+        total: amountMatch ? Number(amountMatch[1].replace(/,/g, '')) : 120.00,
+        confidenceScore: pastedText ? 0.90 : 0.62,
+        notes: suspiciousFlags.length > 0 ? 'Local forensic review detected payment-risk language.' : 'Locally parsed financial record',
+        forensicFindings: suspiciousFlags.map((flag, index) => ({
+          id: `offline-finding-${docId}-${index}`,
+          title: flag,
+          severity: 'high',
+          category: 'VISUAL_OR_DOMAIN_IRREGULARITY',
+          explanation: 'This upload contains language commonly associated with altered or fraudulent invoice payment instructions.',
+        })),
       },
       sourceReference: `${source} (Offline local mode)`,
       rawContent: pastedText || `Processed file ${file?.name}`,
-      visualFlags: ['Standard Resolution Verified'],
+      visualFlags: suspiciousFlags.length > 0 ? suspiciousFlags : ['Standard Resolution Verified'],
     };
 
     setDocuments(prev => [newDoc, ...prev]);

@@ -49,13 +49,13 @@ export const VendorsPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
           <NavLink
-            to="/graph"
+            to="/vendors"
             className="px-3 py-1.5 rounded-lg border border-paper-300 bg-white hover:bg-paper-50 text-charcoal-800 text-xs font-semibold flex items-center gap-1.5 shadow-subtle"
           >
             <GitFork className="w-3.5 h-3.5 text-forest-700" />
-            <span>Vendor Graph View</span>
+            <span>Vendor Details</span>
           </NavLink>
         </div>
       </div>
@@ -195,11 +195,11 @@ export const VendorsPage: React.FC = () => {
                 )}
 
                 <NavLink
-                  to="/graph"
+                  to="/vendors"
                   className="px-2.5 py-1 rounded bg-paper-100 hover:bg-paper-200 text-charcoal-800 font-semibold text-[11px] flex items-center gap-1"
                 >
                   <GitFork className="w-3 h-3 text-forest-700" />
-                  <span>Graph</span>
+                  <span>Details</span>
                 </NavLink>
               </div>
             </div>

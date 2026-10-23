@@ -394,7 +394,7 @@ export class AnomalyEngine {
                 title: `Urgent: Suspected Vendor Impersonation (${senderDomain})`,
                 category: 'VISUAL_OR_DOMAIN_IRREGULARITY',
                 severity: 'high',
-                currency: 'USD',
+                currency: 'INR',
                 explanation: `Email sender domain '${senderDomain}' is 1-2 characters divergent from verified vendor domain '${vd}' for ${vendor.name}. Notice substitution or typosquatting (e.g. 'l' instead of 'i').`,
                 supportingRecordIds: [email.id, vendor.id, email.documentId || ''].filter(Boolean),
                 detectionMethod: "Domain Homoglyph & Levenshtein Verifier (Rule #8)",

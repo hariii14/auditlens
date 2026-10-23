@@ -104,3 +104,22 @@
   50% { opacity: 0.4; }
 }
 .pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+
+/* Dashboard-only responsive composition. */
+.dashboard-metrics-grid { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+
+@media (min-width: 640px) {
+  .dashboard-metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1024px) {
+  .dashboard-header-row {
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+  .dashboard-metrics-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .dashboard-content-grid { grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); }
+  .dashboard-primary-grid { grid-template-columns: minmax(250px, 0.9fr) minmax(0, 1.5fr); }
+}
+

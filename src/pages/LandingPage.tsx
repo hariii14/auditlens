@@ -78,11 +78,11 @@ export const LandingPage: React.FC = () => {
               <ArrowRight className="w-4 h-4 text-lime-accent" />
             </NavLink>
             <NavLink
-              to="/graph"
+              to="/investigations"
               className="px-5 py-3 rounded-xl bg-white hover:bg-paper-50 text-charcoal-800 border border-paper-300 font-semibold text-sm flex items-center gap-2 shadow-subtle transition-all"
             >
               <GitFork className="w-4 h-4 text-forest-700" />
-              <span>View Interactive Evidence Graph</span>
+              <span>View Investigations</span>
             </NavLink>
           </div>
 
@@ -194,7 +194,7 @@ export const LandingPage: React.FC = () => {
       <section className="py-20 px-6 max-w-6xl mx-auto space-y-12">
         <div className="text-center max-w-2xl mx-auto space-y-3">
           <h2 className="text-2xl sm:text-3xl font-extrabold text-charcoal-900 tracking-tight">
-            SMBs bleed $8,000 to $25,000 every year silently.
+            SMBs bleed ₹8,000 to ₹25,000 every year silently.
           </h2>
           <p className="text-sm text-charcoal-600">
             Manual cross-referencing between corporate credit cards, PDFs, and emails is too time-consuming. Attackers and SaaS vendors know this.
@@ -244,19 +244,19 @@ export const LandingPage: React.FC = () => {
         </div>
       </section>
 
-      {/* The Evidence Graph Differentiator */}
+      {/* The Evidence Trace Differentiator */}
       <section className="py-20 px-6 bg-paper-50 border-y border-paper-300">
         <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
           <div className="space-y-6">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-forest-100 text-forest-800 text-xs font-semibold">
               <GitFork className="w-3.5 h-3.5" />
-              <span>Signature Evidence Graph</span>
+              <span>Signature Evidence Trace</span>
             </div>
             <h2 className="text-3xl sm:text-4xl font-extrabold text-charcoal-900 tracking-tight leading-tight">
               Trace exactly why an anomaly was raised. Never guess.
             </h2>
             <p className="text-sm sm:text-base text-charcoal-600 leading-relaxed">
-              Unlike black-box cybersecurity tools with cryptic hash codes, AuditLens visualizes every connection. Trace vendors, invoices, bank transactions, emails, and anomaly rules through an interactive node graph.
+              Unlike black-box cybersecurity tools with cryptic hash codes, AuditLens visualizes every connection. Trace vendors, invoices, bank transactions, emails, and anomaly rules through an interactive evidence trace.
             </p>
             <div className="space-y-3 pt-2">
               <div className="flex items-start gap-3">
@@ -283,10 +283,10 @@ export const LandingPage: React.FC = () => {
             </div>
             <div className="pt-2">
               <NavLink
-                to="/graph"
+                to="/investigations"
                 className="px-5 py-2.5 rounded-lg bg-forest-700 hover:bg-forest-800 text-white font-semibold text-xs inline-flex items-center gap-2 shadow-subtle"
               >
-                <span>Launch Interactive Graph</span>
+                <span>Launch Investigations</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </NavLink>
             </div>
@@ -296,12 +296,12 @@ export const LandingPage: React.FC = () => {
             <div className="flex items-center justify-between text-xs pb-3 border-b border-paper-200">
               <span className="font-bold text-charcoal-900 flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-lime-accent ring-2 ring-forest-700"></span>
-                Graph Visualizer
+                Trace Visualizer
               </span>
               <span className="text-charcoal-500 font-mono text-[11px]">8 Node Types · 8 Relationship Types</span>
             </div>
 
-            {/* Visual Node Graph Mockup */}
+            {/* Visual Trace Mockup */}
             <div className="bg-paper-100 rounded-xl p-6 border border-paper-200 relative overflow-hidden min-h-[300px] flex flex-col justify-between">
               <div className="flex justify-between items-start">
                 <div className="p-2.5 rounded-lg bg-white border border-forest-600/40 shadow-sm text-xs font-bold text-charcoal-900 flex items-center gap-2">
