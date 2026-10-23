@@ -1,62 +1,117 @@
 import React, { useState } from 'react';
-import { useParams, NavLink, useNavigate } from 'react-router-dom';
+import { useParams, NavLink } from 'react-router-dom';
 import {
   ArrowLeft,
   ShieldAlert,
   AlertTriangle,
   CheckCircle2,
-  Clock,
   Phone,
   FileText,
   CreditCard,
   Mail,
-  Building2,
   GitFork,
-  ExternalLink,
-  Send,
   User,
-  ShieldCheck,
   Ban,
   Check,
-  AlertCircle,
+  ChevronDown,
+  ChevronUp,
+  Info,
 } from 'lucide-react';
 import { useData } from '../context/DataContext';
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function SeverityBadge({ sev }: { sev: string }) {
+  if (sev === 'high') return <span className="badge-high">High Priority</span>;
+  if (sev === 'medium') return <span className="badge-medium">Medium Priority</span>;
+  return <span className="badge-low">Low Priority</span>;
+}
+
+function StatusPill({ status }: { status: string }) {
+  if (status === 'ESCALATED') return <span className="status-escalated">Escalated</span>;
+  if (status === 'VERIFIED_LEGITIMATE') return <span className="status-verified">Verified Legitimate</span>;
+  if (status === 'RESOLVED') return <span className="status-resolved">Resolved</span>;
+  return <span className="status-needs-review">Needs Review</span>;
+}
+
+function fmt(n: number) {
+  return n.toLocaleString('en-US', { minimumFractionDigits: 2 });
+}
+
+// ─── Evidence Record Row ───────────────────────────────────────────────────────
+
+function EvidenceRow({
+  icon,
+  title,
+  meta,
+  extra,
+  alert,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  meta: string;
+  extra?: string;
+  alert?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div
+      className={`flex items-start gap-3 p-3 rounded-lg border transition-colors cursor-pointer ${
+        alert
+          ? 'bg-red-50 border-red-200'
+          : 'bg-paper-50 border-paper-200 hover:bg-paper-100'
+      }`}
+      onClick={() => setExpanded(e => !e)}
+    >
+      <div className="mt-0.5 shrink-0">{icon}</div>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-semibold text-charcoal-900">{title}</p>
+        <p className="text-[11px] text-charcoal-500 mt-0.5">{meta}</p>
+        {expanded && extra && (
+          <p className="text-[11px] text-charcoal-700 mt-1.5 leading-relaxed font-mono bg-white rounded p-2 border border-paper-200">
+            {extra}
+          </p>
+        )}
+      </div>
+      <button className="shrink-0 text-charcoal-300">
+        {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+      </button>
+    </div>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
 export const InvestigationDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const { investigations, anomalies, vendors, invoices, transactions, emails, updateInvestigationReview } = useData();
 
-  const investigation = investigations.find((inv) => inv.id === id);
-  const anomaly = anomalies.find((a) => investigation?.anomalyIds.includes(a.id));
-  const vendor = vendors.find((v) => investigation?.relatedVendorIds.includes(v.id));
+  const investigation = investigations.find(inv => inv.id === id);
+  const anomaly = anomalies.find(a => investigation?.anomalyIds.includes(a.id));
+  const vendor = vendors.find(v => investigation?.relatedVendorIds.includes(v.id));
 
   const [checklist, setChecklist] = useState<Record<number, boolean>>({});
   const [noteText, setNoteText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [auditOpen, setAuditOpen] = useState(false);
 
   if (!investigation || !anomaly) {
     return (
       <div className="p-12 text-center max-w-xl mx-auto space-y-4">
-        <AlertTriangle className="w-10 h-10 text-alert-amber mx-auto" />
-        <h3 className="text-base font-bold text-charcoal-800">Investigation Dossier Not Found</h3>
-        <p className="text-xs text-charcoal-500">The requested investigation record does not exist or has been archived.</p>
-        <NavLink
-          to="/investigations"
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-forest-700 text-white text-xs font-semibold"
-        >
+        <AlertTriangle className="w-8 h-8 text-amber-500 mx-auto" />
+        <h3 className="text-sm font-bold text-charcoal-800">Investigation Not Found</h3>
+        <p className="text-xs text-charcoal-500">This record does not exist or has been archived.</p>
+        <NavLink to="/investigations" className="btn-primary inline-flex">
           <ArrowLeft className="w-3.5 h-3.5" />
-          <span>Return to Triage List</span>
+          Return to Investigations
         </NavLink>
       </div>
     );
   }
 
-  // Toggle checklist item
-  const toggleCheck = (idx: number) => {
-    setChecklist((prev) => ({ ...prev, [idx]: !prev[idx] }));
-  };
+  const toggleCheck = (idx: number) =>
+    setChecklist(prev => ({ ...prev, [idx]: !prev[idx] }));
 
   const handleAction = async (action: 'NEEDS_REVIEW' | 'VERIFIED_LEGITIMATE' | 'ESCALATED') => {
     setIsSubmitting(true);
@@ -64,14 +119,13 @@ export const InvestigationDetailPage: React.FC = () => {
     try {
       const defaultNote =
         action === 'ESCALATED'
-          ? 'Marked as Escalated. Outgoing payment halted and vendor contact alerted.'
+          ? 'Marked as Escalated — outgoing payment halted.'
           : action === 'VERIFIED_LEGITIMATE'
-          ? 'Verified legitimate by authorized human reviewer. Discrepancy cleared.'
+          ? 'Verified legitimate by authorized reviewer. Discrepancy cleared.'
           : 'Status reset to Needs Review for follow-up.';
-
       await updateInvestigationReview(investigation.id, action, noteText.trim() || defaultNote);
       setNoteText('');
-      setFeedbackMsg({ type: 'success', text: `Investigation updated to: ${action.replace(/_/g, ' ')}` });
+      setFeedbackMsg({ type: 'success', text: `Status updated to: ${action.replace(/_/g, ' ')}` });
     } catch (err: any) {
       setFeedbackMsg({ type: 'error', text: err.message || 'Error updating status' });
     } finally {
@@ -93,337 +147,376 @@ export const InvestigationDetailPage: React.FC = () => {
     }
   };
 
-  // Find supporting records
-  const supportingInvoices = invoices.filter((i) => anomaly.supportingRecordIds.includes(i.id));
-  const supportingTransactions = transactions.filter((t) => anomaly.supportingRecordIds.includes(t.id));
-  const supportingEmails = emails.filter((e) => anomaly.supportingRecordIds.includes(e.id));
+  const supportingInvoices = invoices.filter(i => anomaly.supportingRecordIds.includes(i.id));
+  const supportingTransactions = transactions.filter(t => anomaly.supportingRecordIds.includes(t.id));
+  const supportingEmails = emails.filter(e => anomaly.supportingRecordIds.includes(e.id));
+  const completedChecks = Object.values(checklist).filter(Boolean).length;
+  const totalChecks = anomaly.verificationChecklist.length;
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto">
-      {/* Top Breadcrumb and Actions */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-paper-300 gap-3">
-        <div className="flex items-center gap-3">
+    <div className="max-w-4xl mx-auto space-y-4">
+      {/* Sticky header */}
+      <div className="flex items-start sm:items-center justify-between gap-3 pb-3 border-b border-paper-300">
+        <div className="flex items-start gap-3">
           <NavLink
             to="/investigations"
-            className="p-2 rounded-lg border border-paper-300 bg-white hover:bg-paper-100 text-charcoal-700 transition-colors"
+            className="p-1.5 rounded-lg border border-paper-300 bg-white hover:bg-paper-100 text-charcoal-700 transition-colors mt-0.5 shrink-0"
           >
             <ArrowLeft className="w-4 h-4" />
           </NavLink>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded ${
-                investigation.severity === 'high'
-                  ? 'bg-alert-redBg text-alert-red border border-alert-redBorder'
-                  : 'bg-alert-amberBg text-alert-amber border border-alert-amberBorder'
-              }`}>
-                {investigation.severity} Priority
-              </span>
-              <span className="font-mono text-xs text-charcoal-400">ID: {investigation.id}</span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5 mb-1">
+              <SeverityBadge sev={investigation.severity} />
+              <StatusPill status={investigation.status} />
+              {vendor && (
+                <span className="text-[11px] text-charcoal-500 font-medium">
+                  {vendor.name}
+                </span>
+              )}
+              {anomaly.amountInDispute && (
+                <span className="text-[11px] font-bold text-charcoal-900 bg-paper-200 px-1.5 py-0.5 rounded">
+                  {anomaly.currency} {fmt(anomaly.amountInDispute)} at stake
+                </span>
+              )}
             </div>
-            <h1 className="text-lg font-bold text-charcoal-900 mt-0.5">
-              {investigation.title}
-            </h1>
+            <h1 className="text-base font-bold text-charcoal-900 leading-tight">{investigation.title}</h1>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <NavLink
-            to={`/graph`}
-            className="px-3 py-1.5 rounded-lg border border-paper-300 bg-white hover:bg-paper-50 text-charcoal-800 text-xs font-semibold flex items-center gap-1.5 shadow-subtle"
-          >
-            <GitFork className="w-3.5 h-3.5 text-forest-700" />
-            <span>Trace In Graph</span>
-          </NavLink>
-        </div>
+        <NavLink
+          to="/graph"
+          className="btn-secondary shrink-0"
+        >
+          <GitFork className="w-3.5 h-3.5 text-forest-700" />
+          <span className="hidden sm:inline">Trace in Graph</span>
+        </NavLink>
       </div>
 
+      {/* Feedback message */}
       {feedbackMsg && (
-        <div className={`p-3 rounded-lg text-xs flex items-center gap-2 ${
+        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${
           feedbackMsg.type === 'success'
             ? 'bg-forest-50 border border-forest-600/30 text-forest-900'
-            : 'bg-alert-redBg border border-alert-redBorder text-alert-red'
+            : 'bg-red-50 border border-red-200 text-red-800'
         }`}>
-          {feedbackMsg.type === 'success' ? <CheckCircle2 className="w-4 h-4 text-forest-700" /> : <AlertTriangle className="w-4 h-4" />}
-          <span>{feedbackMsg.text}</span>
+          {feedbackMsg.type === 'success'
+            ? <CheckCircle2 className="w-3.5 h-3.5 text-forest-700 shrink-0" />
+            : <AlertTriangle className="w-3.5 h-3.5 shrink-0" />}
+          {feedbackMsg.text}
         </div>
       )}
 
-      {/* Hero Plain-English Finding Card */}
-      <div className="p-6 rounded-2xl bg-white border border-paper-300 shadow-subtle space-y-4">
-        <div className="flex items-center justify-between pb-3 border-b border-paper-200">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-charcoal-500">Forensic Anomaly Dossier</span>
-            <span className="text-[11px] font-mono bg-paper-100 text-charcoal-700 px-2 py-0.5 rounded border border-paper-200">
-              {anomaly.category}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-charcoal-500">Current Status:</span>
-            <span className={`px-2.5 py-0.5 rounded-md font-bold text-xs ${
-              investigation.status === 'ESCALATED'
-                ? 'bg-alert-red text-white'
-                : investigation.status === 'VERIFIED_LEGITIMATE' || investigation.status === 'RESOLVED'
-                ? 'bg-forest-100 text-forest-900'
-                : 'bg-amber-100 text-amber-900'
-            }`}>
-              {investigation.status.replace(/_/g, ' ')}
-            </span>
-          </div>
-        </div>
-
-        <div>
-          <h3 className="text-sm font-bold text-charcoal-900 mb-1">Plain-English Forensic Finding</h3>
-          <p className="text-xs sm:text-sm text-charcoal-700 leading-relaxed bg-paper-50 p-4 rounded-xl border border-paper-200">
-            {anomaly.explanation}
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-          <div className="p-3 rounded-lg bg-paper-50 border border-paper-200 space-y-1">
-            <span className="text-[10px] font-bold uppercase text-charcoal-400">Deterministic Rule Applied</span>
-            <p className="font-mono text-xs font-semibold text-charcoal-800">{anomaly.detectionRule}</p>
-            <p className="text-[11px] text-charcoal-500">{anomaly.detectionMethod}</p>
-          </div>
-
-          <div className="p-3 rounded-lg bg-amber-50/70 border border-amber-200 space-y-1">
-            <span className="text-[10px] font-bold uppercase text-amber-900">Uncertainty & What Remains Unverified</span>
-            <p className="text-xs text-amber-900 leading-relaxed">{anomaly.uncertainty}</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Side-by-Side Comparison (Historical vs Suspicious or Dual Payment) */}
-      {anomaly.category === 'BENEFICIARY_ALTERATION' && vendor && (
-        <div className="p-6 rounded-2xl bg-white border border-paper-300 shadow-subtle space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-paper-200">
-            <h3 className="text-sm font-bold text-charcoal-900 flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4 text-alert-red" />
-              <span>Remittance Comparison: Historical Verified vs Inbound Suspicious</span>
-            </h3>
-            <span className="text-xs text-alert-red font-semibold">Divergence Detected</span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-            {/* Historical Verified */}
-            <div className="p-4 rounded-xl bg-forest-50/60 border border-forest-600/30 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-forest-900 flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-forest-700" />
-                  Historical Verified Details on File
-                </span>
-                <span className="text-[10px] bg-forest-100 text-forest-800 px-1.5 py-0.5 rounded font-semibold">Master Vault</span>
-              </div>
-              <div className="space-y-1 text-charcoal-700 font-mono text-[11px] bg-white p-3 rounded-lg border border-forest-200">
-                <p><strong>Bank:</strong> {vendor.availableIdentifiers.verifiedBankAccounts[0]?.bankName || 'Chase Commercial'}</p>
-                <p><strong>Account:</strong> ****{vendor.availableIdentifiers.verifiedBankAccounts[0]?.last4 || '4491'}</p>
-                <p><strong>Country:</strong> {vendor.availableIdentifiers.verifiedBankAccounts[0]?.country || 'US'}</p>
-                <p><strong>Verified Domain:</strong> {vendor.availableIdentifiers.verifiedEmailDomains[0]}</p>
-              </div>
-              <p className="text-[11px] text-forest-800">
-                Used successfully in 14 prior transactions with 0 chargebacks.
-              </p>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Main content — 2/3 */}
+        <div className="lg:col-span-2 space-y-4">
+          {/* Finding summary */}
+          <div className="panel">
+            <div className="panel-header">
+              <h3 className="panel-title">Finding Summary</h3>
+              <span className="text-[10px] font-mono bg-paper-100 text-charcoal-600 px-1.5 py-0.5 rounded border border-paper-200">
+                {anomaly.category.replace(/_/g, ' ')}
+              </span>
             </div>
-
-            {/* Suspicious Proposed Remittance */}
-            <div className="p-4 rounded-xl bg-alert-redBg border border-alert-redBorder space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-alert-red flex items-center gap-1.5">
-                  <AlertTriangle className="w-4 h-4" />
-                  Suspicious Instructions on Invoice INV-8821
-                </span>
-                <span className="text-[10px] bg-red-100 text-red-800 px-1.5 py-0.5 rounded font-semibold">Flagged</span>
-              </div>
-              <div className="space-y-1 text-charcoal-800 font-mono text-[11px] bg-white p-3 rounded-lg border border-red-200">
-                <p className="text-red-700"><strong>Bank:</strong> Cayman Trust Offshore Bank</p>
-                <p className="text-red-700"><strong>Account:</strong> ****9012 (Offshore)</p>
-                <p className="text-red-700"><strong>Routing:</strong> CYM-88219 (Swift: CYTRKYXX)</p>
-                <p className="text-red-700"><strong>Sender Domain:</strong> @apex-loglstics.com ('l' not 'i')</p>
-              </div>
-              <p className="text-[11px] text-alert-red font-semibold">
-                ⚠ DKIM Failed. Domain registered 6 days ago via NameCheap Privacy.
+            <div className="px-4 py-3 space-y-3">
+              {/* Plain-English explanation */}
+              <p className="text-xs text-charcoal-700 leading-relaxed">
+                {anomaly.explanation}
               </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Why triggered */}
+                <div className="bg-paper-50 rounded-lg border border-paper-200 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-charcoal-400 mb-1">
+                    Detection Rule
+                  </p>
+                  <p className="text-[11px] font-mono font-semibold text-charcoal-800 mb-1">
+                    {anomaly.detectionRule}
+                  </p>
+                  <p className="text-[11px] text-charcoal-500">{anomaly.detectionMethod}</p>
+                </div>
+
+                {/* Uncertainty */}
+                <div className="bg-amber-50 rounded-lg border border-amber-200 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700 mb-1">
+                    What Remains Uncertain
+                  </p>
+                  <p className="text-[11px] text-amber-900 leading-relaxed">{anomaly.uncertainty}</p>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* 1-Tap Dialer for verified vendor contact */}
-          {vendor.availableIdentifiers.phone && (
-            <div className="p-3 rounded-xl bg-paper-100 border border-paper-300 flex items-center justify-between">
-              <div className="flex items-center gap-2.5 text-xs">
-                <Phone className="w-4 h-4 text-forest-700" />
-                <span>
-                  Verified phone on file for <strong>{vendor.name}</strong>: <code className="font-bold text-charcoal-900">{vendor.availableIdentifiers.phone}</code> ({vendor.availableIdentifiers.contactPerson})
-                </span>
+          {/* Side-by-side comparison for beneficiary alterations */}
+          {anomaly.category === 'BENEFICIARY_ALTERATION' && vendor && (
+            <div className="panel">
+              <div className="panel-header">
+                <h3 className="panel-title flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 text-red-600" />
+                  Remittance Comparison
+                </h3>
+                <span className="text-[11px] text-red-600 font-semibold">Divergence Detected</span>
               </div>
-              <a
-                href={`tel:${vendor.availableIdentifiers.phone}`}
-                className="px-3 py-1.5 rounded-lg bg-forest-700 hover:bg-forest-800 text-white text-xs font-semibold flex items-center gap-1.5"
-              >
-                <Phone className="w-3.5 h-3.5" />
-                <span>Call Verified Contact</span>
-              </a>
+              <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Verified */}
+                <div className="rounded-lg bg-forest-50 border border-forest-600/30 p-3 space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-forest-700" />
+                    <span className="text-[11px] font-bold text-forest-900">Verified on File</span>
+                  </div>
+                  <div className="font-mono text-[11px] text-charcoal-700 space-y-1 bg-white rounded p-2 border border-forest-200">
+                    <p><strong>Bank:</strong> {vendor.availableIdentifiers.verifiedBankAccounts[0]?.bankName || 'Chase Commercial'}</p>
+                    <p><strong>Account:</strong> ****{vendor.availableIdentifiers.verifiedBankAccounts[0]?.last4 || '4491'}</p>
+                    <p><strong>Country:</strong> {vendor.availableIdentifiers.verifiedBankAccounts[0]?.country || 'US'}</p>
+                    <p><strong>Domain:</strong> {vendor.availableIdentifiers.verifiedEmailDomains[0]}</p>
+                  </div>
+                </div>
+                {/* Suspicious */}
+                <div className="rounded-lg bg-red-50 border border-red-200 p-3 space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
+                    <span className="text-[11px] font-bold text-red-800">Suspicious — INV-8821</span>
+                  </div>
+                  <div className="font-mono text-[11px] text-red-800 space-y-1 bg-white rounded p-2 border border-red-200">
+                    <p>Bank: Cayman Trust Offshore Bank</p>
+                    <p>Account: ****9012 (Offshore)</p>
+                    <p>Routing: CYM-88219 (CYTRKYXX)</p>
+                    <p className="text-red-700">Domain: apex-loglstics.com ('l' ≠ 'i')</p>
+                  </div>
+                  <p className="text-[10px] text-red-700 font-semibold">⚠ DKIM Failed · Domain registered 6 days ago</p>
+                </div>
+              </div>
+
+              {vendor.availableIdentifiers.phone && (
+                <div className="px-4 pb-3">
+                  <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-paper-50 border border-paper-200">
+                    <div className="flex items-center gap-2 text-xs">
+                      <Phone className="w-4 h-4 text-forest-700" />
+                      <span>
+                        Verified contact for <strong>{vendor.name}</strong>:{' '}
+                        <code className="font-bold">{vendor.availableIdentifiers.phone}</code>
+                        {vendor.availableIdentifiers.contactPerson && (
+                          <span className="text-charcoal-400"> ({vendor.availableIdentifiers.contactPerson})</span>
+                        )}
+                      </span>
+                    </div>
+                    <a
+                      href={`tel:${vendor.availableIdentifiers.phone}`}
+                      className="btn-primary"
+                    >
+                      <Phone className="w-3 h-3" />
+                      Call
+                    </a>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Supporting evidence */}
+          {(supportingInvoices.length > 0 || supportingTransactions.length > 0 || supportingEmails.length > 0) && (
+            <div className="panel">
+              <div className="panel-header">
+                <h3 className="panel-title">Supporting Evidence</h3>
+                <span className="text-[11px] text-charcoal-400">{anomaly.supportingRecordIds.length} records</span>
+              </div>
+              <div className="px-4 py-3 space-y-2">
+                {supportingInvoices.map(inv => (
+                  <EvidenceRow
+                    key={inv.id}
+                    icon={<FileText className="w-3.5 h-3.5 text-charcoal-500" />}
+                    title={`Invoice ${inv.invoiceNumber}`}
+                    meta={`${inv.currency} ${fmt(inv.total)} · ${inv.invoiceDate}`}
+                    extra={`Vendor: ${vendors.find(v => v.id === inv.vendorId)?.name || inv.vendorId} · Doc: ${inv.documentId} · Due: ${inv.dueDate || 'N/A'} · Bank: ${inv.paymentDetails.bankName || 'N/A'}`}
+                    alert={inv.visualFlags && inv.visualFlags.length > 0}
+                  />
+                ))}
+                {supportingTransactions.map(tx => (
+                  <EvidenceRow
+                    key={tx.id}
+                    icon={<CreditCard className="w-3.5 h-3.5 text-charcoal-500" />}
+                    title={tx.description}
+                    meta={`${tx.currency} ${fmt(tx.amount)} debit · ${tx.date} · ${tx.accountName}`}
+                    extra={`Status: ${tx.status} · Reference: ${tx.reference} · Reconciled to: ${tx.reconciledInvoiceId || 'Unlinked'}`}
+                    alert={tx.status === 'flagged'}
+                  />
+                ))}
+                {supportingEmails.map(em => (
+                  <EvidenceRow
+                    key={em.id}
+                    icon={<Mail className="w-3.5 h-3.5 text-amber-600" />}
+                    title={em.subject}
+                    meta={`From: ${em.sender} · ${em.date}`}
+                    extra={em.domainFlags?.headerAlert || em.body.slice(0, 300)}
+                    alert={em.domainFlags?.isTyposquatCandidate}
+                  />
+                ))}
+              </div>
             </div>
           )}
         </div>
-      )}
 
-      {/* Supporting Records Table */}
-      <div className="p-6 rounded-2xl bg-white border border-paper-300 shadow-subtle space-y-4">
-        <h3 className="text-sm font-bold text-charcoal-900">
-          Supporting Multimodal Evidence Records ({anomaly.supportingRecordIds.length})
-        </h3>
-
-        <div className="space-y-2 text-xs">
-          {supportingInvoices.map((inv) => (
-            <div key={inv.id} className="p-3 rounded-lg bg-paper-50 border border-paper-200 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <FileText className="w-4 h-4 text-charcoal-600" />
-                <div>
-                  <span className="font-bold text-charcoal-900">Invoice {inv.invoiceNumber}</span>
-                  <span className="text-charcoal-500 ml-2">Total: {inv.currency} {inv.total} ({inv.invoiceDate})</span>
-                </div>
-              </div>
-              <span className="font-mono text-[11px] text-charcoal-400">Doc: {inv.documentId}</span>
+        {/* Sidebar — 1/3 */}
+        <div className="space-y-4">
+          {/* Verification checklist */}
+          <div className="panel">
+            <div className="panel-header">
+              <h3 className="panel-title">Verification Checklist</h3>
+              <span className="text-[11px] text-charcoal-500 font-medium">
+                {completedChecks}/{totalChecks}
+              </span>
             </div>
-          ))}
-
-          {supportingTransactions.map((tx) => (
-            <div key={tx.id} className="p-3 rounded-lg bg-paper-50 border border-paper-200 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <CreditCard className="w-4 h-4 text-cobalt-600" />
-                <div>
-                  <span className="font-bold text-charcoal-900">{tx.description}</span>
-                  <span className="text-charcoal-500 ml-2">Debit: {tx.currency} {tx.amount} on {tx.accountName}</span>
-                </div>
+            <div className="px-3 py-3 space-y-1.5">
+              {/* Progress bar */}
+              <div className="w-full h-1 bg-paper-200 rounded-full mb-3 overflow-hidden">
+                <div
+                  className="h-full bg-forest-600 rounded-full transition-all duration-300"
+                  style={{ width: `${totalChecks > 0 ? (completedChecks / totalChecks) * 100 : 0}%` }}
+                />
               </div>
-              <span className="font-mono text-[11px] text-charcoal-400">{tx.date}</span>
-            </div>
-          ))}
-
-          {supportingEmails.map((em) => (
-            <div key={em.id} className="p-3 rounded-lg bg-paper-50 border border-paper-200 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <Mail className="w-4 h-4 text-amber-600" />
-                <div>
-                  <span className="font-bold text-charcoal-900">{em.subject}</span>
-                  <span className="text-charcoal-500 ml-2">From: {em.sender} ({em.date})</span>
-                </div>
-              </div>
-              <span className="font-mono text-[11px] text-charcoal-400">Email Ref</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Recommended Verification Checklist */}
-      <div className="p-6 rounded-2xl bg-white border border-paper-300 shadow-subtle space-y-4">
-        <h3 className="text-sm font-bold text-charcoal-900 flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-forest-700" />
-          <span>Recommended Human Verification Checklist</span>
-        </h3>
-
-        <div className="space-y-2 text-xs">
-          {anomaly.verificationChecklist.map((item, idx) => (
-            <label
-              key={idx}
-              className={`p-3 rounded-lg border transition-colors flex items-start gap-3 cursor-pointer select-none ${
-                checklist[idx] ? 'bg-forest-50/50 border-forest-600/40 text-forest-900' : 'bg-paper-50 border-paper-200 text-charcoal-800 hover:bg-paper-100'
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={!!checklist[idx]}
-                onChange={() => toggleCheck(idx)}
-                className="mt-0.5 rounded text-forest-700 focus:ring-forest-600"
-              />
-              <span className={checklist[idx] ? 'line-through text-charcoal-500' : ''}>{item}</span>
-            </label>
-          ))}
-        </div>
-      </div>
-
-      {/* Reviewer Notes & Decision Action Bar */}
-      <div className="p-6 rounded-2xl bg-white border border-paper-300 shadow-elevated space-y-4">
-        <h3 className="text-sm font-bold text-charcoal-900">
-          Reviewer Triage Decision & Audit Trail
-        </h3>
-
-        <div className="space-y-2">
-          <label className="text-xs font-semibold text-charcoal-600 block">
-            Add Reviewer Notes / Verification Justification:
-          </label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="e.g., Called Elena at verified number; confirmed invoice INV-8821 was an attack attempt."
-              value={noteText}
-              onChange={(e) => setNoteText(e.target.value)}
-              className="flex-1 px-3 py-2 rounded-lg border border-paper-300 text-xs focus:outline-none focus:ring-1 focus:ring-forest-600"
-            />
-            <button
-              onClick={handleAddNote}
-              disabled={isSubmitting || !noteText.trim()}
-              className="px-3.5 py-2 rounded-lg border border-paper-300 bg-paper-100 hover:bg-paper-200 text-xs font-semibold text-charcoal-800 disabled:opacity-50"
-            >
-              Add Note
-            </button>
-          </div>
-        </div>
-
-        {/* 3 Explicit Decisions */}
-        <div className="pt-3 border-t border-paper-200 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-1.5 text-xs text-charcoal-500">
-            <ShieldCheck className="w-4 h-4 text-forest-700" />
-            <span>Zero Disruption Policy: No payment paused without this click.</span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => handleAction('NEEDS_REVIEW')}
-              disabled={isSubmitting}
-              className="px-3.5 py-2 rounded-lg border border-paper-300 bg-white hover:bg-paper-100 text-xs font-semibold text-charcoal-700"
-            >
-              Needs Follow-Up
-            </button>
-
-            <button
-              onClick={() => handleAction('VERIFIED_LEGITIMATE')}
-              disabled={isSubmitting}
-              className="px-4 py-2 rounded-lg bg-forest-700 hover:bg-forest-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-subtle"
-            >
-              <Check className="w-3.5 h-3.5" />
-              <span>I Verified This — Approve</span>
-            </button>
-
-            <button
-              onClick={() => handleAction('ESCALATED')}
-              disabled={isSubmitting}
-              className="px-4 py-2 rounded-lg bg-alert-red hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-subtle"
-            >
-              <Ban className="w-3.5 h-3.5" />
-              <span>Pause Payment & Escalate</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Review History Logs */}
-        <div className="pt-4 border-t border-paper-200 space-y-2">
-          <h4 className="text-xs font-bold text-charcoal-500 uppercase tracking-wider">
-            Chronological Audit Log ({investigation.reviewHistory.length})
-          </h4>
-          <div className="space-y-2">
-            {investigation.reviewHistory.map((rev) => (
-              <div key={rev.id} className="p-3 rounded-lg bg-paper-50 border border-paper-200 text-xs space-y-1">
-                <div className="flex justify-between text-[11px] text-charcoal-500">
-                  <span className="font-semibold text-charcoal-800 flex items-center gap-1">
-                    <User className="w-3 h-3 text-forest-700" />
-                    {rev.author}
+              {anomaly.verificationChecklist.map((item, idx) => (
+                <label
+                  key={idx}
+                  className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors text-xs ${
+                    checklist[idx]
+                      ? 'bg-forest-50 border-forest-600/30 text-forest-900'
+                      : 'bg-paper-50 border-paper-200 text-charcoal-700 hover:bg-paper-100'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!checklist[idx]}
+                    onChange={() => toggleCheck(idx)}
+                    className="mt-0.5 rounded text-forest-700 focus:ring-forest-600 shrink-0"
+                  />
+                  <span className={checklist[idx] ? 'line-through text-charcoal-400' : ''}>
+                    {item}
                   </span>
-                  <span className="font-mono">{new Date(rev.timestamp).toLocaleString()}</span>
-                </div>
-                <p className="text-charcoal-700">{rev.notes}</p>
+                </label>
+              ))}
+              <p className="text-[10px] text-charcoal-400 pt-1">
+                Checklist state persists in this session only.
+              </p>
+            </div>
+          </div>
+
+          {/* Review actions */}
+          <div className="panel">
+            <div className="panel-header">
+              <h3 className="panel-title">Reviewer Decision</h3>
+            </div>
+            <div className="px-3 py-3 space-y-3">
+              {/* Note input */}
+              <div>
+                <label className="text-[11px] font-semibold text-charcoal-600 block mb-1.5">
+                  Add reviewer note
+                </label>
+                <textarea
+                  placeholder="e.g. Called verified contact at Apex. Confirmed the invoice is fraudulent."
+                  value={noteText}
+                  onChange={e => setNoteText(e.target.value)}
+                  rows={3}
+                  className="form-input w-full resize-none"
+                />
+                <button
+                  onClick={handleAddNote}
+                  disabled={isSubmitting || !noteText.trim()}
+                  className="mt-1.5 text-[11px] text-forest-700 hover:underline font-semibold disabled:opacity-40"
+                >
+                  Save note
+                </button>
               </div>
-            ))}
+
+              <div className="pt-2 border-t border-paper-200 space-y-2">
+                <button
+                  id="action-verified"
+                  onClick={() => handleAction('VERIFIED_LEGITIMATE')}
+                  disabled={isSubmitting}
+                  className="btn-primary w-full justify-center"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  Verified Legitimate
+                </button>
+                <button
+                  id="action-escalate"
+                  onClick={() => handleAction('ESCALATED')}
+                  disabled={isSubmitting}
+                  className="btn-danger w-full justify-center"
+                >
+                  <Ban className="w-3.5 h-3.5" />
+                  Pause & Escalate
+                </button>
+                <button
+                  id="action-review"
+                  onClick={() => handleAction('NEEDS_REVIEW')}
+                  disabled={isSubmitting}
+                  className="btn-secondary w-full justify-center text-xs"
+                >
+                  Needs Follow-Up
+                </button>
+              </div>
+
+              <p className="text-[10px] text-charcoal-400 flex items-start gap-1.5 pt-1">
+                <Info className="w-3 h-3 shrink-0 mt-0.5" />
+                No payments are paused or vendors contacted without your explicit action.
+              </p>
+            </div>
+          </div>
+
+          {/* Audit trail (collapsed by default) */}
+          <div className="panel">
+            <button
+              className="panel-header w-full text-left"
+              onClick={() => setAuditOpen(o => !o)}
+            >
+              <h3 className="panel-title">
+                Audit Trail ({investigation.reviewHistory.length})
+              </h3>
+              {auditOpen ? (
+                <ChevronUp className="w-4 h-4 text-charcoal-400" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-charcoal-400" />
+              )}
+            </button>
+
+            {/* Always show the latest event */}
+            {investigation.reviewHistory.length > 0 && (
+              <div className="px-3 py-2.5 border-b border-paper-200">
+                <div className="flex justify-between text-[10px] text-charcoal-400 mb-1">
+                  <span className="flex items-center gap-1 font-medium text-charcoal-700">
+                    <User className="w-3 h-3 text-forest-700" />
+                    {investigation.reviewHistory[investigation.reviewHistory.length - 1].author}
+                  </span>
+                  <span className="font-mono">
+                    {new Date(investigation.reviewHistory[investigation.reviewHistory.length - 1].timestamp).toLocaleDateString()}
+                  </span>
+                </div>
+                <p className="text-[11px] text-charcoal-700">
+                  {investigation.reviewHistory[investigation.reviewHistory.length - 1].notes}
+                </p>
+              </div>
+            )}
+
+            {/* Expanded history */}
+            {auditOpen && investigation.reviewHistory.length > 1 && (
+              <div className="px-3 py-2 space-y-2">
+                {investigation.reviewHistory.slice(0, -1).reverse().map(rev => (
+                  <div key={rev.id} className="text-xs space-y-0.5">
+                    <div className="flex justify-between text-[10px] text-charcoal-400">
+                      <span className="flex items-center gap-1">
+                        <User className="w-3 h-3" />
+                        {rev.author}
+                      </span>
+                      <span className="font-mono">{new Date(rev.timestamp).toLocaleDateString()}</span>
+                    </div>
+                    <p className="text-charcoal-600 pl-4">{rev.notes}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {investigation.reviewHistory.length === 0 && (
+              <p className="px-3 py-3 text-[11px] text-charcoal-400">No review history yet.</p>
+            )}
           </div>
         </div>
       </div>

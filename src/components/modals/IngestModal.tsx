@@ -11,23 +11,33 @@ import {
   Sparkles,
   ArrowRight,
   ShieldCheck,
-  Eye,
+  Trash2,
+  Plus,
+  File,
 } from 'lucide-react';
 import { useData } from '../../context/DataContext';
+import { DocumentRecord } from '../../types';
 
 interface IngestModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
+interface FileEntry {
+  file: File;
+  status: 'queued' | 'processing' | 'done' | 'error';
+  result?: DocumentRecord;
+  error?: string;
+}
+
 export const IngestModal: React.FC<IngestModalProps> = ({ isOpen, onClose }) => {
   const { uploadDocument } = useData();
   const [activeTab, setActiveTab] = useState<'upload' | 'camera' | 'email'>('upload');
   const [dragActive, setDragActive] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileQueue, setFileQueue] = useState<FileEntry[]>([]);
   const [pastedText, setPastedText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [processedResult, setProcessedResult] = useState<any | null>(null);
+  const [allDone, setAllDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -36,31 +46,47 @@ export const IngestModal: React.FC<IngestModalProps> = ({ isOpen, onClose }) => 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setDragActive(true);
-    } else if (e.type === 'dragleave') {
-      setDragActive(false);
-    }
+    if (e.type === 'dragenter' || e.type === 'dragover') setDragActive(true);
+    else if (e.type === 'dragleave') setDragActive(false);
+  };
+
+  const addFiles = (newFiles: FileList | File[]) => {
+    const entries: FileEntry[] = Array.from(newFiles).map(f => ({
+      file: f,
+      status: 'queued',
+    }));
+    setFileQueue(prev => [...prev, ...entries]);
+    setAllDone(false);
+    setError(null);
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      setSelectedFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      addFiles(e.dataTransfer.files);
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setSelectedFile(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      addFiles(e.target.files);
+      e.target.value = '';
     }
   };
 
-  const handleIngest = async () => {
-    if (!selectedFile && !pastedText.trim()) {
-      setError('Please select a file or paste text to ingest.');
+  const removeFile = (idx: number) => {
+    setFileQueue(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleBatchIngest = async () => {
+    if (activeTab !== 'email' && fileQueue.length === 0 && !pastedText.trim()) {
+      setError('Please select at least one file to ingest.');
+      return;
+    }
+    if (activeTab === 'email' && !pastedText.trim() && fileQueue.length === 0) {
+      setError('Please paste email content or attach a file.');
       return;
     }
 
@@ -68,304 +94,333 @@ export const IngestModal: React.FC<IngestModalProps> = ({ isOpen, onClose }) => 
     setError(null);
 
     try {
-      const source = activeTab === 'camera' ? 'Mobile Smart Viewfinder' : activeTab === 'email' ? 'Pasted Email Forward' : 'Manual Upload';
-      const doc = await uploadDocument(selectedFile || undefined, pastedText.trim() || undefined, source);
-      if (doc) {
-        setProcessedResult(doc);
-      } else {
-        setError('Extraction completed with warnings.');
+      if (fileQueue.length > 0) {
+        // Process each file in sequence
+        for (let i = 0; i < fileQueue.length; i++) {
+          if (fileQueue[i].status === 'done') continue;
+          setFileQueue(prev =>
+            prev.map((entry, idx) =>
+              idx === i ? { ...entry, status: 'processing' } : entry
+            )
+          );
+          try {
+            const source =
+              activeTab === 'camera'
+                ? 'Mobile Smart Viewfinder'
+                : activeTab === 'email'
+                ? 'Pasted Email Forward'
+                : 'Manual Upload';
+            const doc = await uploadDocument(fileQueue[i].file, undefined, source);
+            setFileQueue(prev =>
+              prev.map((entry, idx) =>
+                idx === i
+                  ? { ...entry, status: 'done', result: doc || undefined }
+                  : entry
+              )
+            );
+          } catch (err: any) {
+            setFileQueue(prev =>
+              prev.map((entry, idx) =>
+                idx === i
+                  ? { ...entry, status: 'error', error: err.message || 'Processing error' }
+                  : entry
+              )
+            );
+          }
+        }
+      } else if (pastedText.trim()) {
+        const source = activeTab === 'email' ? 'Pasted Email Forward' : 'Pasted Text';
+        await uploadDocument(undefined, pastedText.trim(), source);
+        setPastedText('');
       }
+
+      setAllDone(true);
     } catch (err: any) {
-      setError(err.message || 'Error processing document');
+      setError(err.message || 'Error processing documents');
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleReset = () => {
-    setSelectedFile(null);
+    setFileQueue([]);
     setPastedText('');
-    setProcessedResult(null);
+    setAllDone(false);
     setError(null);
   };
 
+  const doneCount = fileQueue.filter(f => f.status === 'done').length;
+  const errorCount = fileQueue.filter(f => f.status === 'error').length;
+  const totalQueued = fileQueue.length;
+
+  function FileSize({ size }: { size: number }) {
+    if (size < 1024) return <>{size} B</>;
+    if (size < 1024 * 1024) return <>{(size / 1024).toFixed(1)} KB</>;
+    return <>{(size / (1024 * 1024)).toFixed(1)} MB</>;
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-charcoal-900/60 backdrop-blur-sm animate-fadeIn">
-      <div className="bg-white rounded-xl shadow-elevated border border-paper-300 w-full max-w-xl overflow-hidden flex flex-col max-h-[90vh]">
-        {/* Modal Header */}
-        <div className="p-4 border-b border-paper-300 flex items-center justify-between bg-paper-50">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-charcoal-900/50 backdrop-blur-sm">
+      <div className="bg-white rounded-xl shadow-elevated border border-paper-300 w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh]">
+        {/* Header */}
+        <div className="px-4 py-3 border-b border-paper-300 flex items-center justify-between bg-paper-50 shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-forest-700 text-white flex items-center justify-center">
-              <UploadCloud className="w-4 h-4 text-lime-accent" />
+            <div className="w-7 h-7 rounded-lg bg-forest-700 text-white flex items-center justify-center shrink-0">
+              <UploadCloud className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-charcoal-900">Multimodal Ingestion Pipeline</h2>
-              <p className="text-[11px] text-charcoal-500">Autonomous OCR, DPI inspection, and entity matching</p>
+              <h2 className="text-sm font-bold text-charcoal-900">Batch Upload & Scan</h2>
+              <p className="text-[10px] text-charcoal-500">OCR extraction, DPI inspection & anomaly detection</p>
             </div>
           </div>
           <button
             onClick={() => { handleReset(); onClose(); }}
-            className="p-1.5 rounded-lg text-charcoal-400 hover:text-charcoal-700 hover:bg-paper-200"
+            className="p-1.5 rounded-lg text-charcoal-400 hover:text-charcoal-700 hover:bg-paper-200 transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Modal Body */}
-        <div className="p-6 overflow-y-auto space-y-4 flex-1">
-          {processedResult ? (
-            /* Result Success View */
-            <div className="space-y-4 animate-fadeIn">
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* Success view */}
+          {allDone && totalQueued > 0 ? (
+            <div className="space-y-4">
               <div className="p-4 rounded-xl bg-forest-50 border border-forest-600/30 flex items-start gap-3">
-                <CheckCircle2 className="w-5 h-5 text-forest-700 mt-0.5 flex-shrink-0" />
+                <CheckCircle2 className="w-5 h-5 text-forest-700 mt-0.5 shrink-0" />
                 <div>
-                  <h4 className="text-sm font-bold text-forest-900">Document Successfully Ingested & Analyzed</h4>
+                  <h4 className="text-sm font-bold text-forest-900">
+                    {doneCount}/{totalQueued} {doneCount === 1 ? 'document' : 'documents'} ingested
+                    {errorCount > 0 && ` · ${errorCount} with errors`}
+                  </h4>
                   <p className="text-xs text-forest-800 mt-0.5">
-                    Extracted metadata and verified against historical vendor profiles.
+                    Documents processed and verified against vendor profiles. Anomaly engine ran automatically.
                   </p>
                 </div>
               </div>
 
-              <div className="bg-paper-50 border border-paper-300 rounded-lg p-4 space-y-2.5 text-xs">
-                <div className="flex justify-between py-1 border-b border-paper-200">
-                  <span className="text-charcoal-500">Document ID:</span>
-                  <span className="font-mono font-medium text-charcoal-900">{processedResult.id}</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-paper-200">
-                  <span className="text-charcoal-500">Extracted Vendor:</span>
-                  <span className="font-semibold text-charcoal-900">{processedResult.extractedFields.vendorName || 'Identified'}</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-paper-200">
-                  <span className="text-charcoal-500">Amount / Total:</span>
-                  <span className="font-bold text-forest-800">
-                    {processedResult.extractedFields.currency || 'USD'} {processedResult.extractedFields.total?.toFixed(2) || '0.00'}
-                  </span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-paper-200">
-                  <span className="text-charcoal-500">Forensic Confidence:</span>
-                  <span className="font-medium text-emerald-700">{Math.round((processedResult.extractedFields.confidenceScore || 0.95) * 100)}% Match</span>
-                </div>
-                <div className="py-1">
-                  <span className="text-charcoal-500 block mb-1">Visual / DPI Flags:</span>
-                  <div className="flex flex-wrap gap-1">
-                    {(processedResult.visualFlags || ['Standard Resolution Verified']).map((flag: string, idx: number) => (
-                      <span key={idx} className="px-2 py-0.5 rounded bg-white border border-paper-300 text-[11px] text-charcoal-700">
-                        {flag}
-                      </span>
-                    ))}
+              {/* Per-file results */}
+              <div className="space-y-2">
+                {fileQueue.map((entry, i) => (
+                  <div
+                    key={i}
+                    className={`flex items-center gap-3 p-2.5 rounded-lg border text-xs ${
+                      entry.status === 'error'
+                        ? 'bg-red-50 border-red-200'
+                        : 'bg-forest-50 border-forest-600/20'
+                    }`}
+                  >
+                    <File className={`w-4 h-4 shrink-0 ${entry.status === 'error' ? 'text-red-500' : 'text-forest-700'}`} />
+                    <span className="font-medium text-charcoal-800 truncate flex-1">{entry.file.name}</span>
+                    {entry.status === 'done' ? (
+                      <span className="text-forest-700 font-semibold shrink-0">✓ Parsed</span>
+                    ) : (
+                      <span className="text-red-600 font-semibold shrink-0">{entry.error || 'Error'}</span>
+                    )}
                   </div>
-                </div>
+                ))}
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  onClick={handleReset}
-                  className="px-3.5 py-2 rounded-lg border border-paper-300 text-xs font-medium text-charcoal-700 hover:bg-paper-100"
-                >
-                  Ingest Another
+                <button onClick={handleReset} className="btn-secondary text-xs">
+                  Upload More
                 </button>
-                <button
-                  onClick={onClose}
-                  className="px-4 py-2 rounded-lg bg-forest-700 hover:bg-forest-800 text-white text-xs font-semibold"
-                >
-                  View In Ledger
+                <button onClick={onClose} className="btn-primary">
+                  View Documents <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
           ) : (
-            /* Upload / Input Tabs */
             <>
-              {/* Tab Selector */}
-              <div className="grid grid-cols-3 gap-1 p-1 bg-paper-100 rounded-lg border border-paper-300 text-xs font-medium">
-                <button
-                  onClick={() => setActiveTab('upload')}
-                  className={`py-1.5 rounded-md flex items-center justify-center gap-1.5 transition-colors ${
-                    activeTab === 'upload' ? 'bg-white text-charcoal-900 shadow-sm font-semibold' : 'text-charcoal-500 hover:text-charcoal-800'
-                  }`}
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  <span>PDF / File</span>
-                </button>
-                <button
-                  onClick={() => setActiveTab('camera')}
-                  className={`py-1.5 rounded-md flex items-center justify-center gap-1.5 transition-colors ${
-                    activeTab === 'camera' ? 'bg-white text-charcoal-900 shadow-sm font-semibold' : 'text-charcoal-500 hover:text-charcoal-800'
-                  }`}
-                >
-                  <Camera className="w-3.5 h-3.5" />
-                  <span>Mobile Scan</span>
-                </button>
-                <button
-                  onClick={() => setActiveTab('email')}
-                  className={`py-1.5 rounded-md flex items-center justify-center gap-1.5 transition-colors ${
-                    activeTab === 'email' ? 'bg-white text-charcoal-900 shadow-sm font-semibold' : 'text-charcoal-500 hover:text-charcoal-800'
-                  }`}
-                >
-                  <Mail className="w-3.5 h-3.5" />
-                  <span>Paste Email</span>
-                </button>
+              {/* Tab selector */}
+              <div className="grid grid-cols-3 gap-1 p-0.5 bg-paper-100 rounded-lg border border-paper-300 text-xs font-medium">
+                {[
+                  { key: 'upload', label: 'PDF / File', icon: <FileText className="w-3.5 h-3.5" /> },
+                  { key: 'camera', label: 'Receipt Scan', icon: <Camera className="w-3.5 h-3.5" /> },
+                  { key: 'email', label: 'Email Forward', icon: <Mail className="w-3.5 h-3.5" /> },
+                ].map(t => (
+                  <button
+                    key={t.key}
+                    id={`tab-${t.key}`}
+                    onClick={() => setActiveTab(t.key as any)}
+                    className={`py-1.5 rounded-md flex items-center justify-center gap-1.5 transition-colors ${
+                      activeTab === t.key
+                        ? 'bg-white text-charcoal-900 shadow-sm font-semibold'
+                        : 'text-charcoal-500 hover:text-charcoal-700'
+                    }`}
+                  >
+                    {t.icon}
+                    {t.label}
+                  </button>
+                ))}
               </div>
 
-              {/* Tab Content: Upload File */}
-              {activeTab === 'upload' && (
-                <div
-                  onDragEnter={handleDrag}
-                  onDragLeave={handleDrag}
-                  onDragOver={handleDrag}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
-                    dragActive
-                      ? 'border-forest-600 bg-forest-50/50'
-                      : 'border-paper-300 hover:border-forest-600/50 bg-paper-50/50'
-                  }`}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    className="hidden"
-                    accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.txt"
-                    onChange={handleFileChange}
-                  />
-                  <div className="w-12 h-12 rounded-full bg-forest-100 text-forest-700 flex items-center justify-center mx-auto mb-3">
-                    <UploadCloud className="w-6 h-6" />
-                  </div>
-                  {selectedFile ? (
-                    <div>
-                      <p className="text-xs font-bold text-charcoal-900">{selectedFile.name}</p>
-                      <p className="text-[11px] text-charcoal-500 mt-0.5">{(selectedFile.size / 1024).toFixed(1)} KB · Ready to analyze</p>
-                    </div>
-                  ) : (
-                    <div>
-                      <p className="text-xs font-semibold text-charcoal-800">
-                        Drop PDF invoice, receipt photo, or bank CSV
-                      </p>
-                      <p className="text-[11px] text-charcoal-400 mt-1">
-                        Supports PDF, PNG, JPG, CSV (Up to 15MB)
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Tab Content: Camera / Viewfinder Simulator */}
-              {activeTab === 'camera' && (
-                <div className="space-y-3">
-                  <div className="relative rounded-xl overflow-hidden bg-charcoal-900 text-white aspect-[4/3] flex flex-col items-center justify-center border border-charcoal-700 p-4">
-                    {/* Viewfinder crosshairs and guidelines */}
-                    <div className="absolute inset-4 border border-dashed border-lime-accent/60 rounded-lg pointer-events-none">
-                      <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-lime-accent"></div>
-                      <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-lime-accent"></div>
-                      <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-lime-accent"></div>
-                      <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-lime-accent"></div>
-                    </div>
-
-                    <div className="text-center z-10 px-4">
-                      <Camera className="w-8 h-8 text-lime-accent mx-auto mb-2 animate-pulse" />
-                      <p className="text-xs font-semibold">Smart Viewfinder Active</p>
-                      <p className="text-[10px] text-paper-300 mt-1">
-                        Auto edge-detection, glare compensation, and 300+ DPI check enabled
-                      </p>
-                    </div>
-
-                    <div className="absolute bottom-3 left-4 right-4 flex items-center justify-between text-[10px] text-paper-300 bg-charcoal-800/80 px-2.5 py-1.5 rounded-md backdrop-blur">
-                      <span>DPI: 340 (Optimal)</span>
-                      <span>Lighting: Balanced</span>
-                      <span className="text-lime-accent font-medium">Ready</span>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      // Generate simulated receipt capture
-                      const dummyBlob = new Blob(
-                        ['Delta Air Lines In-Flight Meal & Baggage Receipt\nAmount: $64.00\nCard: Chase *4491'],
-                        { type: 'text/plain' }
-                      );
-                      const file = new File([dummyBlob], 'Camera_Scan_Receipt_001.txt', { type: 'text/plain' });
-                      setSelectedFile(file);
-                    }}
-                    className="w-full py-2.5 rounded-lg bg-forest-700 hover:bg-forest-800 text-white font-medium text-xs flex items-center justify-center gap-2"
+              {/* Drop zone */}
+              {activeTab !== 'email' && (
+                <div>
+                  <div
+                    className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors ${
+                      dragActive
+                        ? 'border-forest-600 bg-forest-50'
+                        : 'border-paper-300 bg-paper-50 hover:border-forest-600/50 hover:bg-paper-100'
+                    }`}
+                    onDragEnter={handleDrag}
+                    onDragOver={handleDrag}
+                    onDragLeave={handleDrag}
+                    onDrop={handleDrop}
+                    onClick={() => fileInputRef.current?.click()}
                   >
-                    <Camera className="w-4 h-4 text-lime-accent" />
-                    <span>Capture Receipt Snapshot</span>
-                  </button>
-                  {selectedFile && (
-                    <p className="text-[11px] text-forest-700 font-semibold text-center">
-                      ✓ Snapshot captured: {selectedFile.name}
+                    <UploadCloud className={`w-8 h-8 mx-auto mb-2 ${dragActive ? 'text-forest-600' : 'text-charcoal-400'}`} />
+                    <p className="text-xs font-semibold text-charcoal-700">
+                      Drop files here or{' '}
+                      <span className="text-forest-700 underline">browse</span>
                     </p>
+                    <p className="text-[11px] text-charcoal-400 mt-1">
+                      PDFs, images, bank statements — multiple files supported
+                    </p>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept=".pdf,.png,.jpg,.jpeg,.csv,.txt"
+                      onChange={handleFileChange}
+                      className="hidden"
+                    />
+                  </div>
+
+                  {/* File queue */}
+                  {fileQueue.length > 0 && (
+                    <div className="mt-3 space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] text-charcoal-500 mb-2">
+                        <span>{fileQueue.length} file{fileQueue.length > 1 ? 's' : ''} queued</span>
+                        <button
+                          onClick={() => { setFileQueue([]); setAllDone(false); }}
+                          className="text-charcoal-400 hover:text-red-600 transition-colors"
+                        >
+                          Clear all
+                        </button>
+                      </div>
+                      {fileQueue.map((entry, i) => (
+                        <div key={i} className={`flex items-center gap-2.5 p-2 rounded-lg border text-xs ${
+                          entry.status === 'processing'
+                            ? 'bg-forest-50 border-forest-600/30'
+                            : entry.status === 'error'
+                            ? 'bg-red-50 border-red-200'
+                            : entry.status === 'done'
+                            ? 'bg-forest-50 border-forest-600/20'
+                            : 'bg-paper-50 border-paper-200'
+                        }`}>
+                          <File className="w-3.5 h-3.5 text-charcoal-400 shrink-0" />
+                          <span className="font-medium text-charcoal-800 truncate flex-1">{entry.file.name}</span>
+                          <span className="text-charcoal-400 shrink-0 text-[10px]">
+                            <FileSize size={entry.file.size} />
+                          </span>
+                          {entry.status === 'processing' && (
+                            <Loader2 className="w-3.5 h-3.5 text-forest-700 animate-spin shrink-0" />
+                          )}
+                          {entry.status === 'done' && (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-forest-700 shrink-0" />
+                          )}
+                          {entry.status === 'error' && (
+                            <AlertCircle className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                          )}
+                          {entry.status === 'queued' && (
+                            <button
+                              onClick={() => removeFile(i)}
+                              className="text-charcoal-300 hover:text-red-500 transition-colors shrink-0"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+
+                      {/* Add more */}
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-full py-2 rounded-lg border border-dashed border-paper-300 text-[11px] text-charcoal-500 hover:text-charcoal-700 hover:border-charcoal-400 transition-colors flex items-center justify-center gap-1.5 mt-1"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Add more files
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
 
-              {/* Tab Content: Paste Email */}
+              {/* Email paste area */}
               {activeTab === 'email' && (
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between text-[11px] text-charcoal-500">
-                    <span>Forwarding address: <strong className="text-charcoal-800">receipts@auditlens.com</strong></span>
-                    <button
-                      type="button"
-                      onClick={() => setPastedText(
-                        "From: Elena Rostova <accounts@apex-loglstics.com>\nSubject: Updated Wire Details for Invoice INV-8821\n\nHi Sarah,\nOur bank has changed due to an internal audit. Please route the pending ₹5,000 to Cayman Trust Account #9012."
-                      )}
-                      className="text-forest-700 hover:underline font-semibold"
-                    >
-                      Fill Suspicious Example
-                    </button>
-                  </div>
+                  <label className="text-[11px] font-semibold text-charcoal-700 block">
+                    Paste forwarded email or invoice text
+                  </label>
                   <textarea
-                    rows={6}
+                    placeholder="Paste the full email or invoice content here. AuditLens will extract vendor details, amounts, and payment instructions automatically."
                     value={pastedText}
-                    onChange={(e) => setPastedText(e.target.value)}
-                    placeholder="Paste raw vendor email headers, invoice text, or wire remittance instructions here..."
-                    className="w-full p-3 rounded-lg border border-paper-300 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-forest-600 bg-white"
-                  ></textarea>
+                    onChange={e => setPastedText(e.target.value)}
+                    rows={7}
+                    className="form-input w-full resize-none font-mono"
+                  />
+                  <p className="text-[10px] text-charcoal-400">
+                    Domain headers, DKIM flags, and typosquatting patterns will be checked automatically.
+                  </p>
                 </div>
               )}
 
+              {/* Error display */}
               {error && (
-                <div className="p-3 rounded-lg bg-alert-redBg border border-alert-redBorder text-alert-red text-xs flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                  <span>{error}</span>
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  {error}
                 </div>
               )}
 
-              {/* Action Buttons */}
-              <div className="flex items-center justify-between pt-2">
-                <div className="flex items-center gap-1.5 text-[11px] text-charcoal-500">
-                  <ShieldCheck className="w-3.5 h-3.5 text-forest-700" />
-                  <span>Encrypted & Read-Only Ingestion</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={onClose}
-                    className="px-3.5 py-2 rounded-lg border border-paper-300 text-xs font-medium text-charcoal-700 hover:bg-paper-100"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleIngest}
-                    disabled={isProcessing}
-                    className="px-4 py-2 rounded-lg bg-forest-700 hover:bg-forest-800 text-white text-xs font-semibold flex items-center gap-1.5 shadow-subtle disabled:opacity-50"
-                  >
-                    {isProcessing ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        <span>Analyzing Multimodal Stream...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="w-3.5 h-3.5 text-lime-accent" />
-                        <span>Run Forensic Extraction</span>
-                      </>
-                    )}
-                  </button>
-                </div>
+              {/* Info strip */}
+              <div className="flex items-start gap-2 px-3 py-2 bg-paper-50 rounded-lg border border-paper-200 text-[11px] text-charcoal-500">
+                <ShieldCheck className="w-4 h-4 text-forest-700 shrink-0 mt-0.5" />
+                <span>
+                  <strong className="text-charcoal-700">Zero Disruption Policy</strong> — no payments are paused or vendors contacted without your explicit action.
+                </span>
               </div>
             </>
           )}
         </div>
+
+        {/* Footer actions */}
+        {!allDone && (
+          <div className="px-4 py-3 border-t border-paper-300 flex items-center justify-between bg-paper-50 shrink-0">
+            <div className="flex items-center gap-1.5 text-[11px] text-charcoal-400">
+              <Sparkles className="w-3.5 h-3.5 text-forest-700" />
+              <span>Gemini AI extraction where configured</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { handleReset(); onClose(); }}
+                className="btn-secondary text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                id="ingest-submit-btn"
+                onClick={handleBatchIngest}
+                disabled={isProcessing || (fileQueue.length === 0 && !pastedText.trim())}
+                className="btn-primary min-w-28 justify-center"
+              >
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Processing…
+                  </>
+                ) : (
+                  <>
+                    Ingest {fileQueue.length > 1 ? `${fileQueue.length} Files` : fileQueue.length === 1 ? 'File' : 'Document'}
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

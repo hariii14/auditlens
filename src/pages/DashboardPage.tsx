@@ -1,340 +1,509 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
-  TrendingUp,
   ShieldAlert,
-  CheckCircle2,
   AlertTriangle,
-  ArrowRight,
-  CreditCard,
-  Building2,
   FileText,
   DollarSign,
-  ArrowUpRight,
-  ExternalLink,
-  Clock,
-  Sparkles,
+  ArrowRight,
+  ChevronRight,
   GitFork,
+  CheckCircle2,
+  Clock,
+  Upload,
+  Circle,
+  TrendingUp,
 } from 'lucide-react';
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  Legend,
-} from 'recharts';
 import { useData } from '../context/DataContext';
+import { AnomalyRecord, InvestigationRecord } from '../types';
 
-const TREND_DATA = [
-  { month: 'Jun', recovered: 1200, prevented: 2500, leaks: 800 },
-  { month: 'Jul', recovered: 1900, prevented: 3200, leaks: 650 },
-  { month: 'Aug', recovered: 2400, prevented: 4100, leaks: 520 },
-  { month: 'Sep', recovered: 3100, prevented: 5800, leaks: 410 },
-  { month: 'Oct', recovered: 4180, prevented: 8000, leaks: 300 },
-];
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-export const DashboardPage: React.FC = () => {
-  const { company, anomalies, transactions, investigations, metrics, documents } = useData();
+function fmt(n: number) {
+  return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
 
-  const highSeverityAnomalies = anomalies.filter(
-    (a) => a.severity === 'high' && (a.status === 'NEEDS_REVIEW' || a.status === 'ESCALATED')
-  );
+function fmtAmt(n: number, currency = 'USD') {
+  if (n >= 1000) return `${currency} ${fmt(n)}`;
+  return `${currency} ${n.toFixed(2)}`;
+}
 
-  const pendingInvestigations = investigations.filter(
-    (i) => i.status === 'NEEDS_REVIEW' || i.status === 'ESCALATED'
-  );
+function SeverityDot({ sev }: { sev: string }) {
+  const color =
+    sev === 'high' ? 'bg-red-500' : sev === 'medium' ? 'bg-amber-500' : 'bg-charcoal-400';
+  return <span className={`inline-block w-2 h-2 rounded-full ${color} shrink-0`} />;
+}
+
+function SeverityBadge({ sev }: { sev: string }) {
+  if (sev === 'high') return <span className="badge-high">High</span>;
+  if (sev === 'medium') return <span className="badge-medium">Med</span>;
+  return <span className="badge-low">Low</span>;
+}
+
+function StatusPill({ status }: { status: string }) {
+  if (status === 'ESCALATED') return <span className="status-escalated">Escalated</span>;
+  if (status === 'VERIFIED_LEGITIMATE') return <span className="status-verified">Verified</span>;
+  if (status === 'RESOLVED') return <span className="status-resolved">Resolved</span>;
+  return <span className="status-needs-review">Needs Review</span>;
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+interface MetricStripProps {
+  openCount: number;
+  highRiskCount: number;
+  amountAtStake: number;
+  docsProcessed: number;
+}
+
+function MetricStrip({ openCount, highRiskCount, amountAtStake, docsProcessed }: MetricStripProps) {
+  const metrics = [
+    {
+      id: 'open-inv',
+      icon: <ShieldAlert className="w-4 h-4 text-amber-600" />,
+      label: 'Open Investigations',
+      value: openCount,
+      sub: 'unresolved findings',
+      href: '/investigations',
+    },
+    {
+      id: 'high-risk',
+      icon: <AlertTriangle className="w-4 h-4 text-red-600" />,
+      label: 'High Risk',
+      value: highRiskCount,
+      sub: 'priority findings',
+      href: '/investigations',
+      highlight: highRiskCount > 0,
+    },
+    {
+      id: 'amount-stake',
+      icon: <DollarSign className="w-4 h-4 text-charcoal-600" />,
+      label: 'Potential Exposure',
+      value: `${amountAtStake >= 1000 ? fmt(amountAtStake) : amountAtStake.toFixed(0)}`,
+      prefix: 'USD ',
+      sub: 'across open cases',
+      href: '/investigations',
+    },
+    {
+      id: 'docs-processed',
+      icon: <FileText className="w-4 h-4 text-forest-700" />,
+      label: 'Documents Processed',
+      value: docsProcessed,
+      sub: 'invoices, receipts & feeds',
+      href: '/documents',
+    },
+  ];
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
-      {/* Top Banner / Triage Alert if any High-Severity findings exist */}
-      {highSeverityAnomalies.length > 0 && (
-        <div className="p-4 rounded-xl bg-alert-redBg border border-alert-redBorder flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-subtle animate-fadeIn">
-          <div className="flex items-start gap-3">
-            <div className="w-8 h-8 rounded-lg bg-alert-red text-white flex items-center justify-center flex-shrink-0 mt-0.5">
-              <AlertTriangle className="w-4 h-4" />
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-paper-300 border border-paper-300 rounded-xl overflow-hidden">
+      {metrics.map((m, i) => (
+        <NavLink
+          key={m.id}
+          to={m.href}
+          className={`flex items-start gap-3 px-4 py-3 bg-white hover:bg-paper-50 transition-colors ${
+            m.highlight ? 'bg-red-50 hover:bg-red-50' : ''
+          }`}
+        >
+          <div className="mt-0.5 shrink-0">{m.icon}</div>
+          <div className="min-w-0">
+            <p className="text-[11px] text-charcoal-500 font-medium leading-tight mb-0.5">{m.label}</p>
+            <p className={`text-xl font-extrabold tracking-tight leading-none ${m.highlight ? 'text-red-700' : 'text-charcoal-900'}`}>
+              {m.prefix && <span className="text-xs font-semibold text-charcoal-500 mr-0.5">{m.prefix}</span>}
+              {m.value}
+            </p>
+            <p className="text-[10px] text-charcoal-400 mt-0.5">{m.sub}</p>
+          </div>
+        </NavLink>
+      ))}
+    </div>
+  );
+}
+
+// Risk distribution bar
+function RiskBar({ anomalies }: { anomalies: AnomalyRecord[] }) {
+  const open = anomalies.filter(a => a.status === 'NEEDS_REVIEW' || a.status === 'ESCALATED');
+  const high = open.filter(a => a.severity === 'high').length;
+  const med = open.filter(a => a.severity === 'medium').length;
+  const low = open.filter(a => a.severity === 'low').length;
+  const total = open.length || 1;
+
+  const byCategory: Record<string, number> = {};
+  open.forEach(a => {
+    const cat = a.category.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+    byCategory[cat] = (byCategory[cat] || 0) + 1;
+  });
+
+  return (
+    <div className="panel">
+      <div className="panel-header">
+        <h3 className="panel-title">Risk Distribution</h3>
+        <span className="text-[11px] text-charcoal-400">{open.length} open</span>
+      </div>
+      <div className="px-4 py-3 space-y-3">
+        {/* Stacked bar */}
+        <div className="h-2 rounded-full overflow-hidden flex gap-px bg-paper-200">
+          {high > 0 && (
+            <div className="bg-red-500 h-full rounded-l-full" style={{ width: `${(high / total) * 100}%` }} />
+          )}
+          {med > 0 && (
+            <div className="bg-amber-400 h-full" style={{ width: `${(med / total) * 100}%` }} />
+          )}
+          {low > 0 && (
+            <div className="bg-charcoal-300 h-full rounded-r-full" style={{ width: `${(low / total) * 100}%` }} />
+          )}
+        </div>
+
+        {/* Legend */}
+        <div className="grid grid-cols-3 gap-2 text-xs">
+          {[
+            { label: 'High', count: high, color: 'bg-red-500' },
+            { label: 'Medium', count: med, color: 'bg-amber-400' },
+            { label: 'Low', count: low, color: 'bg-charcoal-300' },
+          ].map(r => (
+            <div key={r.label} className="flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-sm ${r.color} shrink-0`} />
+              <span className="text-charcoal-600">{r.label}</span>
+              <span className="font-bold text-charcoal-900 ml-auto">{r.count}</span>
             </div>
-            <div>
-              <h3 className="text-sm font-bold text-alert-red">
-                Action Required: {highSeverityAnomalies.length} High-Risk Discrepancies Require Approval
-              </h3>
-              <p className="text-xs text-charcoal-700 mt-0.5">
-                Suspected wire redirection to Cayman Trust (Apex Logistics) & duplicate CloudBox debit detected.
-              </p>
+          ))}
+        </div>
+
+        {/* Category breakdown */}
+        {Object.keys(byCategory).length > 0 && (
+          <div className="pt-3 border-t border-paper-200 space-y-2">
+            {Object.entries(byCategory).map(([cat, cnt]) => (
+              <div key={cat} className="flex items-center gap-2 text-xs">
+                <div className="flex-1 h-1 bg-paper-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-charcoal-400 rounded-full"
+                    style={{ width: `${(cnt / total) * 100}%` }}
+                  />
+                </div>
+                <span className="text-charcoal-600 text-[11px] w-28 truncate text-right">{cat}</span>
+                <span className="font-semibold text-charcoal-800 w-4 text-right">{cnt}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Priority queue — compact table style
+function PriorityQueue({ investigations, anomalies }: { investigations: InvestigationRecord[]; anomalies: AnomalyRecord[] }) {
+  const pending = investigations
+    .filter(i => i.status === 'NEEDS_REVIEW' || i.status === 'ESCALATED')
+    .sort((a, b) => {
+      const sevOrder = { high: 0, medium: 1, low: 2 };
+      return (sevOrder[a.severity] - sevOrder[b.severity]) ||
+        (a.status === 'ESCALATED' ? -1 : 1);
+    })
+    .slice(0, 5);
+
+  return (
+    <div className="panel">
+      <div className="panel-header">
+        <h3 className="panel-title">Priority Review Queue</h3>
+        <NavLink to="/investigations" className="text-[11px] text-forest-700 font-semibold hover:underline flex items-center gap-0.5">
+          View all <ChevronRight className="w-3.5 h-3.5" />
+        </NavLink>
+      </div>
+
+      {pending.length === 0 ? (
+        <div className="px-4 py-8 text-center">
+          <CheckCircle2 className="w-6 h-6 text-forest-600 mx-auto mb-2" />
+          <p className="text-xs text-charcoal-600 font-medium">No pending findings</p>
+          <p className="text-[11px] text-charcoal-400">All investigations resolved</p>
+        </div>
+      ) : (
+        <div className="divide-y divide-paper-200">
+          {pending.map((inv) => {
+            const anomaly = anomalies.find(a => inv.anomalyIds.includes(a.id));
+            const amount = anomaly?.amountInDispute;
+            const vendorName = anomaly?.explanation
+              ? anomaly.explanation.split(' ').slice(0, 4).join(' ') + '…'
+              : null;
+
+            return (
+              <NavLink
+                key={inv.id}
+                to={`/investigations/${inv.id}`}
+                className="flex items-center gap-3 px-4 py-3 hover:bg-paper-50 transition-colors group"
+              >
+                <SeverityDot sev={inv.severity} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-charcoal-900 truncate group-hover:text-forest-800 transition-colors">
+                    {inv.title}
+                  </p>
+                  {anomaly?.explanation && (
+                    <p className="text-[11px] text-charcoal-500 truncate mt-0.5">
+                      {anomaly.explanation.slice(0, 80)}…
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {amount && (
+                    <span className="text-[11px] font-bold text-charcoal-900 hidden sm:inline">
+                      {anomaly?.currency} {fmt(amount)}
+                    </span>
+                  )}
+                  <StatusPill status={inv.status} />
+                  <ChevronRight className="w-3.5 h-3.5 text-charcoal-300 group-hover:text-forest-600 transition-colors" />
+                </div>
+              </NavLink>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Recent activity feed
+function RecentActivity({ documents, investigations }: { documents: any[]; investigations: InvestigationRecord[] }) {
+  const events = useMemo(() => {
+    const docEvents = documents.slice(0, 3).map(d => ({
+      id: d.id,
+      type: 'document' as const,
+      text: `Document ingested: ${d.filename.split('_').slice(-1)[0] || d.filename}`,
+      sub: d.processingStatus === 'flagged' ? 'Flagged for review' : 'Successfully parsed',
+      date: d.uploadDate,
+      alert: d.processingStatus === 'flagged',
+    }));
+
+    const invEvents = investigations
+      .filter(i => i.reviewHistory.length > 0)
+      .flatMap(i => i.reviewHistory.slice(-1).map(h => ({
+        id: h.id,
+        type: 'review' as const,
+        text: `Finding reviewed: ${i.title.slice(0, 40)}${i.title.length > 40 ? '…' : ''}`,
+        sub: h.action.replace(/_/g, ' '),
+        date: h.timestamp.slice(0, 10),
+        alert: false,
+      })));
+
+    return [...docEvents, ...invEvents]
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 6);
+  }, [documents, investigations]);
+
+  return (
+    <div className="panel">
+      <div className="panel-header">
+        <h3 className="panel-title">Recent Activity</h3>
+      </div>
+      <div className="divide-y divide-paper-200">
+        {events.length === 0 ? (
+          <p className="px-4 py-4 text-xs text-charcoal-400">No recent activity</p>
+        ) : (
+          events.map(ev => (
+            <div key={ev.id} className="px-4 py-2.5 flex items-start gap-2.5">
+              <div className="mt-1 shrink-0">
+                {ev.type === 'document' ? (
+                  <FileText className={`w-3.5 h-3.5 ${ev.alert ? 'text-red-500' : 'text-charcoal-400'}`} />
+                ) : (
+                  <CheckCircle2 className="w-3.5 h-3.5 text-forest-600" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-medium text-charcoal-800 truncate">{ev.text}</p>
+                <p className={`text-[10px] mt-0.5 ${ev.alert ? 'text-red-600 font-semibold' : 'text-charcoal-400'}`}>
+                  {ev.sub} · {ev.date}
+                </p>
+              </div>
             </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Evidence graph preview
+function GraphPreview({ investigations }: { investigations: InvestigationRecord[] }) {
+  const openCount = investigations.filter(i => i.status === 'NEEDS_REVIEW' || i.status === 'ESCALATED').length;
+  const totalEdges = 18; // from mock data structure
+
+  return (
+    <div className="panel">
+      <div className="panel-header">
+        <h3 className="panel-title">Evidence Graph</h3>
+        <NavLink
+          to="/graph"
+          className="text-[11px] text-forest-700 font-semibold hover:underline flex items-center gap-0.5"
+        >
+          Open <ArrowRight className="w-3.5 h-3.5" />
+        </NavLink>
+      </div>
+      <div className="px-4 py-3">
+        {/* Mini preview — schematic nodes */}
+        <div className="h-24 bg-paper-50 rounded-lg border border-paper-200 flex items-center justify-center relative overflow-hidden">
+          {/* Static illustrative graph preview */}
+          <svg viewBox="0 0 200 80" className="w-full h-full" fill="none">
+            {/* Edges */}
+            <line x1="100" y1="40" x2="40" y2="20" stroke="#DEDFD8" strokeWidth="1" />
+            <line x1="100" y1="40" x2="160" y2="20" stroke="#DEDFD8" strokeWidth="1" />
+            <line x1="100" y1="40" x2="60" y2="60" stroke="#DC2626" strokeWidth="1.5" strokeDasharray="3,2" />
+            <line x1="100" y1="40" x2="150" y2="65" stroke="#DEDFD8" strokeWidth="1" />
+            <line x1="40" y1="20" x2="60" y2="60" stroke="#DEDFD8" strokeWidth="1" />
+            {/* Nodes */}
+            <circle cx="100" cy="40" r="7" fill="#176B4D" />
+            <circle cx="40" cy="20" r="5" fill="#E4F4ED" stroke="#176B4D" strokeWidth="1.5" />
+            <circle cx="160" cy="20" r="5" fill="#E4F4ED" stroke="#176B4D" strokeWidth="1.5" />
+            <circle cx="60" cy="60" r="6" fill="#FEF2F2" stroke="#DC2626" strokeWidth="1.5" />
+            <circle cx="150" cy="65" r="4" fill="#F7F7F4" stroke="#DEDFD8" strokeWidth="1" />
+          </svg>
+          {/* Labels */}
+          <div className="absolute bottom-1.5 left-3 text-[9px] text-charcoal-400 font-medium">Vendors · Invoices · Anomalies</div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+          {[
+            { label: 'Nodes', value: '24' },
+            { label: 'Edges', value: String(totalEdges) },
+            { label: 'Flagged', value: String(openCount) },
+          ].map(s => (
+            <div key={s.label} className="px-2 py-1.5 bg-paper-50 rounded border border-paper-200">
+              <p className="text-sm font-bold text-charcoal-900">{s.value}</p>
+              <p className="text-[10px] text-charcoal-400">{s.label}</p>
+            </div>
+          ))}
+        </div>
+
+        <NavLink
+          to="/graph"
+          className="mt-3 w-full py-1.5 px-3 rounded-lg bg-paper-100 hover:bg-paper-200 border border-paper-300 text-xs font-semibold text-charcoal-700 flex items-center justify-center gap-1.5 transition-colors"
+        >
+          <GitFork className="w-3.5 h-3.5 text-forest-700" />
+          Open Evidence Graph
+        </NavLink>
+      </div>
+    </div>
+  );
+}
+
+// ─── Dashboard Page ───────────────────────────────────────────────────────────
+
+export const DashboardPage: React.FC = () => {
+  const { company, anomalies, investigations, documents, metrics } = useData();
+
+  const openInvestigations = investigations.filter(
+    i => i.status === 'NEEDS_REVIEW' || i.status === 'ESCALATED'
+  );
+  const highRiskCount = anomalies.filter(
+    a => a.severity === 'high' && (a.status === 'NEEDS_REVIEW' || a.status === 'ESCALATED')
+  ).length;
+
+  const amountAtStake = useMemo(() => {
+    return anomalies
+      .filter(a => a.status === 'NEEDS_REVIEW' || a.status === 'ESCALATED')
+      .reduce((sum, a) => sum + (a.amountInDispute || 0), 0);
+  }, [anomalies]);
+
+  const docsProcessed = documents.filter(
+    d => d.processingStatus === 'parsed' || d.processingStatus === 'flagged'
+  ).length;
+
+  return (
+    <div className="space-y-4 max-w-7xl mx-auto">
+      {/* High-risk banner */}
+      {highRiskCount > 0 && (
+        <div className="flex items-center justify-between px-4 py-2.5 rounded-lg bg-red-50 border border-red-200">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+            <p className="text-xs font-semibold text-red-800">
+              {highRiskCount} high-risk {highRiskCount === 1 ? 'finding requires' : 'findings require'} your attention
+            </p>
           </div>
           <NavLink
             to="/investigations"
-            className="px-4 py-2 rounded-lg bg-alert-red hover:bg-red-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 flex-shrink-0 transition-colors shadow-subtle"
+            className="text-xs font-bold text-red-700 hover:underline flex items-center gap-1 shrink-0"
           >
-            <span>Enter Triage Queue</span>
-            <ArrowRight className="w-3.5 h-3.5" />
+            Review now <ArrowRight className="w-3.5 h-3.5" />
           </NavLink>
         </div>
       )}
 
-      {/* Hero Metric Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Metric 1: Net Recovered & Prevented */}
-        <div className="p-5 rounded-xl bg-white border border-paper-300 shadow-subtle space-y-3">
-          <div className="flex items-center justify-between text-charcoal-500">
-            <span className="text-xs font-semibold uppercase tracking-wider">Net Recovered & Prevented</span>
-            <div className="w-7 h-7 rounded bg-forest-100 text-forest-700 flex items-center justify-center">
-              <TrendingUp className="w-4 h-4" />
-            </div>
-          </div>
-          <div>
-            <div className="text-2xl font-extrabold text-charcoal-900 tracking-tight">
-              ${(metrics.recoveredAmount + metrics.preventedFraudAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-            </div>
-            <div className="flex items-center gap-2 mt-1">
-              <span className="text-xs font-bold text-forest-700">+18.4%</span>
-              <span className="text-[11px] text-charcoal-500">vs last month</span>
-            </div>
-          </div>
-          <div className="pt-2 border-t border-paper-200 flex justify-between text-[11px] text-charcoal-500">
-            <span>SaaS Recovered: <strong className="text-charcoal-800">${metrics.recoveredAmount.toLocaleString()}</strong></span>
-            <span>Fraud Halted: <strong className="text-charcoal-800">${metrics.preventedFraudAmount.toLocaleString()}</strong></span>
-          </div>
-        </div>
+      {/* Metric strip */}
+      <MetricStrip
+        openCount={openInvestigations.length}
+        highRiskCount={highRiskCount}
+        amountAtStake={amountAtStake}
+        docsProcessed={docsProcessed}
+      />
 
-        {/* Metric 2: Audit Cleanliness Score */}
-        <div className="p-5 rounded-xl bg-white border border-paper-300 shadow-subtle space-y-3">
-          <div className="flex items-center justify-between text-charcoal-500">
-            <span className="text-xs font-semibold uppercase tracking-wider">Audit Cleanliness Score</span>
-            <div className="w-7 h-7 rounded bg-forest-100 text-forest-700 flex items-center justify-center">
-              <CheckCircle2 className="w-4 h-4" />
-            </div>
-          </div>
-          <div>
-            <div className="text-2xl font-extrabold text-forest-800 tracking-tight">
-              {metrics.overallScore.toFixed(1)}%
-            </div>
-            <div className="w-full bg-paper-200 h-1.5 rounded-full mt-2 overflow-hidden">
-              <div
-                className="bg-forest-600 h-full rounded-full"
-                style={{ width: `${metrics.overallScore}%` }}
-              ></div>
-            </div>
-          </div>
-          <div className="pt-2 border-t border-paper-200 flex justify-between text-[11px] text-charcoal-500">
-            <span>IRS Deductibility: <strong className="text-forest-700">{metrics.taxReadinessPercent}%</strong></span>
-            <span>Bank Match: <strong className="text-forest-700">95%</strong></span>
-          </div>
-        </div>
+      {/* Main two-column layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Main column (2/3): Priority queue + recent transactions */}
+        <div className="lg:col-span-2 space-y-4">
+          {/* Priority review queue */}
+          <PriorityQueue investigations={investigations} anomalies={anomalies} />
 
-        {/* Metric 3: Open Anomalies & Triage */}
-        <div className="p-5 rounded-xl bg-white border border-paper-300 shadow-subtle space-y-3">
-          <div className="flex items-center justify-between text-charcoal-500">
-            <span className="text-xs font-semibold uppercase tracking-wider">Active Forensic Findings</span>
-            <div className="w-7 h-7 rounded bg-alert-amberBg text-alert-amber flex items-center justify-center">
-              <ShieldAlert className="w-4 h-4" />
-            </div>
-          </div>
-          <div>
-            <div className="text-2xl font-extrabold text-charcoal-900 tracking-tight flex items-baseline gap-2">
-              <span>{pendingInvestigations.length}</span>
-              <span className="text-xs font-semibold text-charcoal-500">Investigations Pending</span>
-            </div>
-            <p className="text-[11px] text-charcoal-500 mt-1">
-              {highSeverityAnomalies.length} High Severity · 0 Pauses Without Approval
-            </p>
-          </div>
-          <div className="pt-2 border-t border-paper-200 flex justify-between text-[11px]">
-            <NavLink to="/investigations" className="text-forest-700 hover:underline font-semibold flex items-center gap-1">
-              <span>Review All Findings</span>
-              <ArrowRight className="w-3 h-3" />
-            </NavLink>
-          </div>
-        </div>
-
-        {/* Metric 4: Multimodal Ingestion Stream */}
-        <div className="p-5 rounded-xl bg-white border border-paper-300 shadow-subtle space-y-3">
-          <div className="flex items-center justify-between text-charcoal-500">
-            <span className="text-xs font-semibold uppercase tracking-wider">Monitored Ingestion</span>
-            <div className="w-7 h-7 rounded bg-cobalt-50 text-cobalt-600 flex items-center justify-center">
-              <FileText className="w-4 h-4" />
-            </div>
-          </div>
-          <div>
-            <div className="text-2xl font-extrabold text-charcoal-900 tracking-tight">
-              {documents.length}
-            </div>
-            <p className="text-[11px] text-charcoal-500 mt-1">
-              PDFs, Receipts, Bank Feeds & Inbound Mails
-            </p>
-          </div>
-          <div className="pt-2 border-t border-paper-200 flex justify-between text-[11px] text-charcoal-500">
-            <span>Reconciled: <strong className="text-charcoal-800">{metrics.reconciledCount}/{metrics.totalTransactions}</strong></span>
-            <NavLink to="/documents" className="text-forest-700 hover:underline font-semibold">
-              Document Vault
-            </NavLink>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Content Grid: Chart + Triage Queue */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left 2 Cols: Monthly Capital Recovery Trend Chart */}
-        <div className="lg:col-span-2 p-5 rounded-xl bg-white border border-paper-300 shadow-subtle space-y-4">
-          <div className="flex items-center justify-between pb-2 border-b border-paper-200">
-            <div>
-              <h3 className="text-sm font-bold text-charcoal-900">Capital Leakage Recovery & Fraud Prevention</h3>
-              <p className="text-[11px] text-charcoal-500">Month-over-month autonomous financial recovery for {company.name}</p>
-            </div>
-            <div className="flex items-center gap-3 text-xs">
-              <span className="flex items-center gap-1 text-forest-700 font-semibold">
-                <span className="w-2.5 h-2.5 rounded-full bg-forest-600"></span> Recovered ($)
-              </span>
-              <span className="flex items-center gap-1 text-charcoal-600 font-semibold">
-                <span className="w-2.5 h-2.5 rounded-full bg-charcoal-400"></span> Fraud Halted ($)
-              </span>
-            </div>
-          </div>
-
-          <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={TREND_DATA} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="recoveredGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#176B4D" stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor="#176B4D" stopOpacity={0.0}/>
-                  </linearGradient>
-                  <linearGradient id="preventedGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#2B59FF" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#2B59FF" stopOpacity={0.0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ECECE8" />
-                <XAxis dataKey="month" stroke="#949B92" fontSize={11} tickLine={false} />
-                <YAxis stroke="#949B92" fontSize={11} tickLine={false} tickFormatter={(val) => `$${val}`} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#FFFFFF', borderColor: '#DEDFD8', borderRadius: '8px', fontSize: '12px' }}
-                  formatter={(value: any) => [`$${value}`, '']}
-                />
-                <Area type="monotone" dataKey="recovered" stroke="#176B4D" strokeWidth={2.5} fillOpacity={1} fill="url(#recoveredGrad)" name="SaaS Leakage Recovered" />
-                <Area type="monotone" dataKey="prevented" stroke="#2B59FF" strokeWidth={2} fillOpacity={1} fill="url(#preventedGrad)" name="Wire/Invoice Fraud Halted" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Right 1 Col: Action Required Triage List */}
-        <div className="p-5 rounded-xl bg-white border border-paper-300 shadow-subtle flex flex-col justify-between space-y-4">
-          <div>
-            <div className="flex items-center justify-between pb-2 border-b border-paper-200">
-              <h3 className="text-sm font-bold text-charcoal-900">Urgent Triage Queue</h3>
-              <NavLink to="/investigations" className="text-xs text-forest-700 hover:underline font-semibold">
-                View All
+          {/* All open investigations compact table */}
+          <div className="panel">
+            <div className="panel-header">
+              <h3 className="panel-title">All Open Investigations</h3>
+              <NavLink to="/investigations" className="text-[11px] text-forest-700 font-semibold hover:underline flex items-center gap-0.5">
+                Manage <ChevronRight className="w-3.5 h-3.5" />
               </NavLink>
             </div>
-
-            <div className="space-y-3 mt-3">
-              {pendingInvestigations.slice(0, 3).map((inv) => (
-                <NavLink
-                  key={inv.id}
-                  to={`/investigations/${inv.id}`}
-                  className="block p-3 rounded-lg border border-paper-200 hover:border-forest-600/40 hover:bg-paper-50 transition-all text-xs space-y-1.5 group"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                      inv.severity === 'high' ? 'bg-alert-redBg text-alert-red border border-alert-redBorder' : 'bg-alert-amberBg text-alert-amber border border-alert-amberBorder'
-                    }`}>
-                      {inv.severity.toUpperCase()} PRIORITY
-                    </span>
-                    <span className="text-[10px] text-charcoal-400 font-mono">
-                      {new Date(inv.createdAt).toLocaleDateString()}
-                    </span>
-                  </div>
-                  <h4 className="font-bold text-charcoal-900 group-hover:text-forest-800 transition-colors line-clamp-1">
-                    {inv.title}
-                  </h4>
-                  <p className="text-[11px] text-charcoal-500 line-clamp-2">
-                    {inv.summaryNote || 'Multi-document forensic finding.'}
-                  </p>
-                </NavLink>
-              ))}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="border-b border-paper-200">
+                    <th className="data-cell font-semibold text-[10px] uppercase tracking-wider text-charcoal-400 w-16">Sev</th>
+                    <th className="data-cell font-semibold text-[10px] uppercase tracking-wider text-charcoal-400">Finding</th>
+                    <th className="data-cell font-semibold text-[10px] uppercase tracking-wider text-charcoal-400 text-right hidden sm:table-cell">Amount</th>
+                    <th className="data-cell font-semibold text-[10px] uppercase tracking-wider text-charcoal-400 hidden md:table-cell">Status</th>
+                    <th className="data-cell w-8" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {investigations.map(inv => {
+                    const anomaly = anomalies.find(a => inv.anomalyIds.includes(a.id));
+                    return (
+                      <tr key={inv.id} className="data-row inv-row">
+                        <td className="data-cell">
+                          <SeverityBadge sev={inv.severity} />
+                        </td>
+                        <td className="data-cell">
+                          <NavLink to={`/investigations/${inv.id}`} className="font-semibold text-charcoal-900 hover:text-forest-700 transition-colors block truncate max-w-xs">
+                            {inv.title}
+                          </NavLink>
+                          {anomaly && (
+                            <p className="text-[10px] text-charcoal-400 truncate max-w-xs mt-0.5">
+                              {anomaly.detectionMethod}
+                            </p>
+                          )}
+                        </td>
+                        <td className="data-cell text-right font-bold text-charcoal-900 hidden sm:table-cell">
+                          {anomaly?.amountInDispute
+                            ? `${anomaly.currency} ${fmt(anomaly.amountInDispute)}`
+                            : '—'}
+                        </td>
+                        <td className="data-cell hidden md:table-cell">
+                          <StatusPill status={inv.status} />
+                        </td>
+                        <td className="data-cell">
+                          <NavLink to={`/investigations/${inv.id}`} className="text-charcoal-300 hover:text-forest-600 transition-colors">
+                            <ChevronRight className="w-4 h-4" />
+                          </NavLink>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
-
-          <div className="pt-2">
-            <NavLink
-              to="/graph"
-              className="w-full py-2.5 px-3.5 rounded-lg bg-paper-100 hover:bg-paper-200 border border-paper-300 text-charcoal-800 font-semibold text-xs flex items-center justify-center gap-2 transition-colors"
-            >
-              <GitFork className="w-4 h-4 text-forest-700" />
-              <span>Inspect Findings in Evidence Graph</span>
-            </NavLink>
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom Section: Live Protected Activity Feed */}
-      <div className="p-5 rounded-xl bg-white border border-paper-300 shadow-subtle space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-paper-200 gap-2">
-          <div>
-            <h3 className="text-sm font-bold text-charcoal-900">Live Protected Activity Feed</h3>
-            <p className="text-[11px] text-charcoal-500">Real-time monitored corporate card and bank ledger matched to digital invoices</p>
-          </div>
-          <NavLink to="/transactions" className="text-xs text-forest-700 hover:underline font-semibold flex items-center gap-1">
-            <span>Open Reconciled Ledger</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </NavLink>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-paper-200 text-charcoal-500 font-semibold uppercase text-[10px] tracking-wider">
-                <th className="py-2.5 px-3">Date</th>
-                <th className="py-2.5 px-3">Description</th>
-                <th className="py-2.5 px-3">Account / Card</th>
-                <th className="py-2.5 px-3">Amount</th>
-                <th className="py-2.5 px-3">Forensic Match</th>
-                <th className="py-2.5 px-3 text-right">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-paper-200">
-              {transactions.map((tx) => (
-                <tr key={tx.id} className="hover:bg-paper-50/70 transition-colors">
-                  <td className="py-3 px-3 font-mono text-charcoal-500">{tx.date}</td>
-                  <td className="py-3 px-3 font-semibold text-charcoal-900">{tx.description}</td>
-                  <td className="py-3 px-3 text-charcoal-600">{tx.accountName}</td>
-                  <td className="py-3 px-3 font-bold text-charcoal-900">
-                    {tx.currency} {tx.amount.toFixed(2)}
-                  </td>
-                  <td className="py-3 px-3 text-charcoal-600">
-                    {tx.reconciledInvoiceId ? (
-                      <span className="font-mono text-charcoal-800 bg-paper-100 px-1.5 py-0.5 rounded border border-paper-200">
-                        {tx.reconciledInvoiceId}
-                      </span>
-                    ) : (
-                      <span className="text-charcoal-400">Unlinked expense</span>
-                    )}
-                  </td>
-                  <td className="py-3 px-3 text-right">
-                    {tx.status === 'reconciled' ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-forest-50 border border-forest-600/20 text-forest-800 text-[10px] font-bold">
-                        <CheckCircle2 className="w-3 h-3 text-forest-700" />
-                        Reconciled
-                      </span>
-                    ) : tx.status === 'flagged' ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-alert-redBg border border-alert-redBorder text-alert-red text-[10px] font-bold">
-                        <AlertTriangle className="w-3 h-3" />
-                        Discrepancy Flagged
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-charcoal-500">Unmatched</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {/* Secondary column (1/3): Risk + activity + graph */}
+        <div className="space-y-4">
+          <RiskBar anomalies={anomalies} />
+          <RecentActivity documents={documents} investigations={investigations} />
+          <GraphPreview investigations={investigations} />
         </div>
       </div>
     </div>

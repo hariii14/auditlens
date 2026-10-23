@@ -8,14 +8,14 @@ export const Layout: React.FC = () => {
   const [isIngestOpen, setIsIngestOpen] = useState(false);
 
   return (
-    <div className="flex min-h-screen bg-paper-100 font-sans text-charcoal-800">
+    <div className="flex h-screen bg-paper-100 font-sans text-charcoal-800 overflow-hidden">
       {/* Permanent Sidebar */}
       <Sidebar onOpenIngest={() => setIsIngestOpen(true)} />
 
       {/* Main Content Column */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <Navbar onOpenIngest={() => setIsIngestOpen(true)} />
-        <main className="flex-1 p-6 overflow-y-auto">
+        <main className="flex-1 p-5 overflow-y-auto">
           <Outlet />
         </main>
       </div>
